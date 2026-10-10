@@ -135,8 +135,18 @@ jobs:
             run_scp() { sshpass -e scp "${OPTS[@]}" -P "$PORT" "$@"; }
           fi
           run_ssh "$USER@$HOST" "mkdir -p \"\$HOME/$APP_DIR/incoming\""
-          run_scp release.tar.gz .github/deploy/remote-release.sh .github/deploy/www-index.php "$USER@$HOST:$APP_DIR/incoming/"
-          run_ssh "$USER@$HOST" "bash \"\$HOME/$APP_DIR/incoming/remote-release.sh\" '$APP_DIR' '$RELEASE' '$PHP_BIN' '$WEB_ROOT'"
+          run_scp release.tar.gz .github/deploy/www-index.php "$USER@$HOST:$APP_DIR/incoming/"
+          # Cafe24's bash wrapper drops script/arguments, so the script goes over stdin and inputs via env.
+          if ! OUTPUT="$(run_ssh "$USER@$HOST" "DEPLOY_APP_DIR='$APP_DIR' DEPLOY_RELEASE='$RELEASE' DEPLOY_PHP_BIN='$PHP_BIN' DEPLOY_WEB_ROOT='$WEB_ROOT' bash -s" < .github/deploy/remote-release.sh 2>&1)"; then
+            printf '%s\n' "$OUTPUT"
+            exit 1
+          fi
+          printf '%s\n' "$OUTPUT"
+          # The restricted remote shell can skip the script yet exit 0, so require the script's own completion line.
+          if ! grep -qF "배포 완료: $RELEASE" <<< "$OUTPUT"; then
+            echo "::error::서버에서 배포 스크립트가 실행되지 않았습니다(완료 메시지 없음). SSH 원격 명령 실행이 허용되는지 확인하세요."
+            exit 1
+          fi
 
       - name: Remove SSH key
         if: always()
