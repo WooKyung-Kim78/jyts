@@ -20,8 +20,9 @@ JYTS가 고객사 서버실에 납품·유지보수하는 장비(항온항습기
 5. [끄기와 다시 켜기](#5-끄기와-다시-켜기)
 6. [테스트와 검사](#6-테스트와-검사)
 7. [배포용 빌드](#7-배포용-빌드)
-8. [자주 생기는 문제](#8-자주-생기는-문제)
-9. [보안 주의사항](#9-보안-주의사항)
+8. [자동 배포 (publish 브랜치)](#8-자동-배포-publish-브랜치)
+9. [자주 생기는 문제](#9-자주-생기는-문제)
+10. [보안 주의사항](#10-보안-주의사항)
 
 ---
 
@@ -168,7 +169,7 @@ DB_PASSWORD=<DB 비밀번호>
 php artisan tinker --execute="DB::select('select 1'); echo 'DB 연결 성공';"
 ```
 
-`DB 연결 성공`이 나오면 됩니다. 실패하면 [8. 자주 생기는 문제](#8-자주-생기는-문제)를 보세요.
+`DB 연결 성공`이 나오면 됩니다. 실패하면 [9. 자주 생기는 문제](#9-자주-생기는-문제)를 보세요.
 
 > DB 구조(migration)는 이미 운영 DB에 적용되어 있습니다. **`php artisan migrate`를 함부로 실행하지 마세요.**
 > 새 migration을 적용할 때는 먼저 `php artisan migrate --pretend`로 SQL을 확인한 뒤 적용합니다.
@@ -267,9 +268,123 @@ php artisan config:cache
 php artisan route:cache
 ```
 
+보통은 직접 빌드하지 않고 아래 자동 배포를 사용합니다.
+
 ---
 
-## 8. 자주 생기는 문제
+## 8. 자동 배포 (publish 브랜치)
+
+`publish` 브랜치에 코드가 들어가면(merge 또는 push) GitHub Actions(`.github/workflows/publish.yml`)가 자동으로 실행됩니다.
+
+```text
+main ──(Pull Request merge)──▶ publish ──▶ GitHub Actions
+  1) Frontend lint + build
+  2) Backend 테스트 (SQLite, 운영 DB 접속 없음)
+  3) 운영용 PHP 패키지 설치 후 압축
+  4) SSH로 Cafe24에 업로드 → ~/jyts/releases/<시각-커밋> 에 풀기
+  5) config/route 캐시, 미적용 migration 검사
+  6) ~/jyts/current 를 새 버전으로 교체 (최근 5개 버전 보관)
+```
+
+어느 단계든 실패하면 서버의 현재 버전은 바뀌지 않습니다.
+
+### 8-1. 처음 한 번: 서버 준비 (Cafe24 SSH)
+
+```bash
+mkdir -p ~/jyts/shared ~/jyts/releases ~/jyts/incoming
+vi ~/jyts/shared/.env        # 운영용 .env 작성 (아래 항목 참고)
+chmod 600 ~/jyts/shared/.env
+```
+
+운영용 `.env` 주요 값 (`backend/.env.example`을 복사해 수정):
+
+```ini
+APP_ENV=production
+APP_DEBUG=false
+APP_KEY=<로컬에서 php artisan key:generate --show 로 만든 값>
+APP_URL=https://wkkim97b.mycafe24.com
+LOG_LEVEL=warning
+DB_HOST=localhost
+DB_PORT=3306
+DB_DATABASE=<DB 이름>
+DB_USERNAME=<DB 사용자>
+DB_PASSWORD=<DB 비밀번호>
+DB_PERSISTENT=false
+SESSION_SECURE_COOKIE=true
+SANCTUM_STATEFUL_DOMAINS=wkkim97b.mycafe24.com
+```
+
+> 이미 운영 중인 `APP_KEY`가 있다면 그 값을 그대로 쓰세요. 바꾸면 기존 로그인 세션이 모두 끊깁니다.
+
+### 8-2. 처음 한 번: 배포용 SSH 키 만들기
+
+내 PC(PowerShell)에서:
+
+```powershell
+ssh-keygen -t ed25519 -f $HOME\.ssh\jyts_deploy -N '""' -C "github-actions-jyts"
+Get-Content $HOME\.ssh\jyts_deploy.pub      # 공개키 (서버에 등록)
+ssh-keyscan -p 22 wkkim97b.mycafe24.com     # known_hosts 값 (GitHub에 등록)
+```
+
+Cafe24 서버(SSH)에서 공개키를 등록합니다:
+
+```bash
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+vi ~/.ssh/authorized_keys      # jyts_deploy.pub 내용을 한 줄로 붙여넣기
+chmod 600 ~/.ssh/authorized_keys
+```
+
+내 PC에서 키로 접속되는지 확인: `ssh -i $HOME\.ssh\jyts_deploy <아이디>@wkkim97b.mycafe24.com`
+
+### 8-3. 처음 한 번: GitHub에 비밀값 등록
+
+GitHub 저장소 → **Settings → Secrets and variables → Actions → New repository secret**
+
+| 이름 | 값 |
+|---|---|
+| `DEPLOY_HOST` | `wkkim97b.mycafe24.com` |
+| `DEPLOY_USER` | Cafe24 SSH 아이디 |
+| `DEPLOY_SSH_KEY` | `jyts_deploy` (비밀키, `.pub` 아님) 파일 내용 전체 |
+| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan` 출력 전체 |
+| `DEPLOY_PORT` | (선택) SSH 포트, 기본 22 |
+
+(선택) **Variables** 탭: `DEPLOY_APP_DIR`(기본 `jyts`), `DEPLOY_PHP_BIN`(기본 `/usr/local/php84/bin/php`)
+
+> 비밀키 파일은 GitHub Secret에만 넣고 다른 곳(채팅, 문서, 저장소)에 올리지 마세요.
+
+### 8-4. 처음 한 번: 웹 루트 연결
+
+첫 자동 배포가 성공해 `~/jyts/current`가 생긴 뒤, Cafe24 SSH에서:
+
+```bash
+mv ~/www ~/www.bak-$(date +%Y%m%d)       # 기존 웹 폴더 백업
+ln -s ~/jyts/current/public ~/www        # 웹 루트를 Laravel public 으로 연결
+```
+
+브라우저에서 https://wkkim97b.mycafe24.com 이 열리는지 확인합니다. 이후 배포부터는 `current`만 바뀌므로 다시 할 필요가 없습니다.
+
+### 8-5. 배포하기
+
+1. DB 구조 변경(migration)이 있다면 **먼저** 로컬에서 `php artisan migrate --pretend`로 SQL을 검토하고 적용합니다.
+   적용하지 않은 migration이 남아 있으면 자동 배포가 일부러 실패합니다(서버는 바뀌지 않음).
+2. GitHub에서 **Pull requests → New pull request**, base: `publish` ← compare: `main` → **Create** → **Merge**.
+   (또는 터미널에서 `git push origin main:publish`)
+3. GitHub → **Actions** 탭에서 "Publish to Cafe24" 진행 상황을 확인합니다. 초록색 체크면 배포 완료입니다.
+4. Actions 탭의 **Run workflow** 버튼으로 다시 배포할 수도 있습니다.
+
+### 8-6. 문제가 생겨 이전 버전으로 되돌리기
+
+Cafe24 SSH에서:
+
+```bash
+ls -1t ~/jyts/releases                                   # 최신순 목록
+ln -sfn ~/jyts/releases/<되돌릴-버전> ~/jyts/current
+cd ~/jyts/current && /usr/local/php84/bin/php artisan config:cache
+```
+
+---
+
+## 9. 자주 생기는 문제
 
 | 증상 | 원인과 해결 |
 |---|---|
@@ -286,7 +401,7 @@ php artisan route:cache
 
 ---
 
-## 9. 보안 주의사항
+## 10. 보안 주의사항
 
 - `backend/.env`, 비밀번호, `APP_KEY`, DB 정보는 **Git, 채팅, 문서에 올리지 않습니다.**
 - 실제 고객 Excel, 사진, 운영 DB 내보내기 파일을 저장소에 넣지 않습니다.

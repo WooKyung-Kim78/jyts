@@ -1,0 +1,94 @@
+name: Publish to Cafe24
+
+on:
+  push:
+    branches: [publish]
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  APP_DIR: ${{ vars.DEPLOY_APP_DIR || 'jyts' }}
+  PHP_BIN: ${{ vars.DEPLOY_PHP_BIN || '/usr/local/php84/bin/php' }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo_sqlite, sqlite3, fileinfo, intl, zip
+          coverage: none
+
+      - name: Install frontend packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint and build frontend
+        run: |
+          pnpm lint
+          pnpm build
+
+      - name: Backend tests (SQLite in-memory)
+        working-directory: backend
+        run: |
+          composer install --no-interaction --no-progress --prefer-dist
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+          php artisan test
+          rm .env
+
+      - name: Install production PHP packages
+        working-directory: backend
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Package release
+        run: |
+          tar -czf release.tar.gz -C backend \
+            --exclude='./.env' --exclude='./.env.*' \
+            --exclude='./tests' --exclude='./storage' \
+            --exclude='./node_modules' --exclude='./.phpunit.cache' \
+            --exclude='./bootstrap/cache/*.php' \
+            .
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload and activate release
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          RELEASE="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          SSH_OPTS="-i ~/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=yes"
+          ssh $SSH_OPTS "$USER@$HOST" "mkdir -p \"\$HOME/$APP_DIR/incoming\""
+          scp -i ~/.ssh/deploy_key -P "$PORT" -o StrictHostKeyChecking=yes \
+            release.tar.gz .github/deploy/remote-release.sh "$USER@$HOST:$APP_DIR/incoming/"
+          ssh $SSH_OPTS "$USER@$HOST" "bash \"\$HOME/$APP_DIR/incoming/remote-release.sh\" '$APP_DIR' '$RELEASE' '$PHP_BIN'"
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -57,6 +57,8 @@ Backend (`backend/`):
 - 도메인 `wkkim97b.mycafe24.com` (HTTPS)
 - React 빌드 결과와 Laravel API를 같은 도메인에서 제공한다.
 - API 경로는 `/api`이다.
+- 배포는 `publish` 브랜치 push/merge 시 GitHub Actions(`.github/workflows/publish.yml`)가 build·Backend 테스트 후 SSH로 `~/jyts/releases/<release>`에 올리고 `~/jyts/current`를 교체한다. 웹 루트 `~/www`는 `~/jyts/current/public` symlink, 운영 `.env`와 `storage`는 `~/jyts/shared`에 둔다. 서버 PHP CLI는 `/usr/local/php84/bin/php`다.
+- 자동 배포는 migration을 실행하지 않는다. 미적용 migration이 있으면 배포를 중단하므로 SQL 검토 후 먼저 적용한다. SSH 키 등 배포 비밀값은 GitHub Secrets에만 둔다.
 
 Frontend는 database에 직접 접속하지 않는다. 모든 데이터 접근은 Laravel API를 통한다.
 
