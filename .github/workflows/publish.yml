@@ -72,11 +72,23 @@ jobs:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # Values pasted on Windows carry CRLF, which makes every known_hosts line unparsable.
+          printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' | grep -v '^#' > ~/.ssh/known_hosts || true
+          LOOKUP="$HOST"
+          [ "$PORT" = 22 ] || LOOKUP="[$HOST]:$PORT"
+          if ! ssh-keygen -F "$LOOKUP" -f ~/.ssh/known_hosts > /dev/null; then
+            echo "::error::DEPLOY_KNOWN_HOSTS 에 DEPLOY_HOST(포트 $PORT)와 일치하는 서버 키가 없습니다. README 8-2 를 참고해 다시 등록하세요."
+            echo "등록된 줄 수: $(wc -l < ~/.ssh/known_hosts)"
+            echo "서버가 현재 제시하는 키 지문 (내 PC에서 확인한 값과 비교용):"
+            ssh-keyscan -p "$PORT" "$HOST" 2>/dev/null | ssh-keygen -lf - || true
+            exit 1
+          fi
           if [ -n "$SSH_KEY" ]; then
-            printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+            printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
             chmod 600 ~/.ssh/deploy_key
             echo "SSH_AUTH=key" >> "$GITHUB_ENV"
           elif [ -n "$SSH_PASSWORD" ]; then

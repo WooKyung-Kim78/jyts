@@ -337,11 +337,16 @@ SANCTUM_STATEFUL_DOMAINS=wkkim97b.mycafe24.com
 
 ### 8-2. 처음 한 번: GitHub에 비밀값 등록
 
-내 PC(PowerShell)에서 서버 식별값(known_hosts)을 확인합니다:
+내 PC(PowerShell)에서 서버 식별값(known_hosts)을 클립보드로 복사합니다:
 
 ```powershell
-ssh-keyscan -p 22 wkkim97b.mycafe24.com
+ssh-keyscan -p 22 wkkim97b.mycafe24.com 2>$null | Set-Clipboard
 ```
+
+`DEPLOY_KNOWN_HOSTS`에 그대로 붙여넣습니다. 보통 `wkkim97b.mycafe24.com ssh-rsa ...`, `... ecdsa-sha2-nistp256 ...`, `... ssh-ed25519 ...` 처럼 **서버 주소로 시작하는 줄 2~3개**입니다.
+`#`으로 시작하는 줄만 있거나 비어 있으면 잘못 복사된 것입니다.
+
+> `DEPLOY_HOST`는 위 명령에 쓴 주소와 **글자까지 똑같아야** 합니다(`https://`, `www.`, IP 주소, 앞뒤 공백 없이).
 
 GitHub 저장소 → **Settings → Secrets and variables → Actions → New repository secret**
 
