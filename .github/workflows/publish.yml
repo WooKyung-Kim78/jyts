@@ -80,11 +80,15 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' | grep -v '^#' > ~/.ssh/known_hosts || true
           LOOKUP="$HOST"
           [ "$PORT" = 22 ] || LOOKUP="[$HOST]:$PORT"
+          if ! timeout 15 bash -c ": </dev/tcp/$HOST/$PORT" 2>/dev/null; then
+            echo "::error::GitHub Actions(해외 서버)에서 DEPLOY_HOST 의 SSH 포트로 연결할 수 없습니다. Cafe24 '해외 IP 접속 차단'(SSH/FTP) 설정과 DEPLOY_PORT 값을 확인하세요."
+            exit 1
+          fi
           if ! ssh-keygen -F "$LOOKUP" -f ~/.ssh/known_hosts > /dev/null; then
             echo "::error::DEPLOY_KNOWN_HOSTS 에 DEPLOY_HOST(포트 $PORT)와 일치하는 서버 키가 없습니다. README 8-2 를 참고해 다시 등록하세요."
-            echo "등록된 줄 수: $(wc -l < ~/.ssh/known_hosts)"
+            echo "등록된 줄 수: $(wc -l < ~/.ssh/known_hosts), 그중 올바른 키 줄 수: $(ssh-keygen -lf ~/.ssh/known_hosts 2>/dev/null | wc -l)"
             echo "서버가 현재 제시하는 키 지문 (내 PC에서 확인한 값과 비교용):"
-            ssh-keyscan -p "$PORT" "$HOST" 2>/dev/null | ssh-keygen -lf - || true
+            ssh-keyscan -T 15 -p "$PORT" "$HOST" 2>&1 | grep -v '^#' | ssh-keygen -lf - || true
             exit 1
           fi
           if [ -n "$SSH_KEY" ]; then
