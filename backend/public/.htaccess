@@ -1,3 +1,6 @@
+# Cafe24 places a default hosting_index.html in the web root; always route / to Laravel.
+DirectoryIndex index.php
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes

@@ -53,9 +53,11 @@ cp "$TARGET/public/.htaccess" "$WEB_ROOT/.htaccess"
 for file in robots.txt favicon.ico; do
   [ -f "$TARGET/public/$file" ] && cp "$TARGET/public/$file" "$WEB_ROOT/$file"
 done
-if [ -f "$WEB_ROOT/index.html" ]; then
-  mv "$WEB_ROOT/index.html" "$WEB_ROOT/index.html.bak-$(date +%Y%m%d%H%M%S)"
-fi
+for file in index.html hosting_index.html; do
+  if [ -f "$WEB_ROOT/$file" ]; then
+    mv "$WEB_ROOT/$file" "$WEB_ROOT/$file.bak-$(date +%Y%m%d%H%M%S)"
+  fi
+done
 
 sed "s#__RELEASE_PATH__#$TARGET#" "$INCOMING/www-index.php" > "$WEB_ROOT/index.php.next"
 mv -f "$WEB_ROOT/index.php.next" "$WEB_ROOT/index.php"

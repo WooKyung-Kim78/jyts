@@ -313,7 +313,7 @@ vi ~/jyts/shared/.env        # 운영용 .env 작성 (아래 항목 참고)
 chmod 600 ~/jyts/shared/.env
 ```
 
-첫 배포 때 `~/www/index.html`이 있으면 `index.html.bak-<시각>`으로 이름이 바뀝니다(`index.php`가 먼저 열리도록). `~/www`의 다른 파일은 건드리지 않습니다.
+첫 배포 때 `~/www/index.html` 또는 Cafe24 기본 안내 페이지 `~/www/hosting_index.html`이 있으면 `<파일명>.bak-<시각>`으로 이름이 바뀝니다(`index.php`가 먼저 열리도록). `.htaccess`도 `DirectoryIndex index.php`로 지정합니다. `~/www`의 다른 파일은 건드리지 않습니다.
 
 운영용 `.env` 주요 값 (`backend/.env.example`을 복사해 수정):
 
