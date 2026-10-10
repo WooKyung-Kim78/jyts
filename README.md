@@ -283,10 +283,27 @@ main ──(Pull Request merge)──▶ publish ──▶ GitHub Actions
   3) 운영용 PHP 패키지 설치 후 압축
   4) SSH로 Cafe24에 업로드 → ~/jyts/releases/<시각-커밋> 에 풀기
   5) config/route 캐시, 미적용 migration 검사
-  6) ~/jyts/current 를 새 버전으로 교체 (최근 5개 버전 보관)
+  6) ~/www 에 진입 파일(index.php, .htaccess)과 화면 빌드(app/) 복사
+  7) index.php 가 새 버전을 가리키도록 교체 (최근 5개 버전 보관)
 ```
 
-어느 단계든 실패하면 서버의 현재 버전은 바뀌지 않습니다.
+어느 단계든 6) 이전에 실패하면 서버의 현재 버전은 바뀌지 않습니다.
+
+서버 폴더 구조 (`~/www`는 Cafe24가 정한 웹 루트라 바꾸지 않습니다):
+
+```text
+~/www/                     웹에 공개되는 폴더 (배포가 아래 파일만 관리)
+  index.php                Laravel 진입 파일 (현재 버전 경로를 가리킴)
+  .htaccess                주소 재작성 규칙
+  app/                     화면 빌드 파일 (JS, CSS)
+~/jyts/                    웹에서 접근할 수 없는 폴더
+  releases/<버전>/        Laravel 코드 (vendor 포함)
+  current → releases/<최신>
+  shared/.env              운영 설정 (비밀번호 포함)
+  shared/storage/          업로드 파일, 세션, 로그
+```
+
+`.env`, `vendor`, 업로드 파일은 모두 `~/www` 밖에 있어 웹으로 직접 열 수 없습니다.
 
 ### 8-1. 처음 한 번: 서버 준비 (Cafe24 SSH)
 
@@ -294,7 +311,10 @@ main ──(Pull Request merge)──▶ publish ──▶ GitHub Actions
 mkdir -p ~/jyts/shared ~/jyts/releases ~/jyts/incoming
 vi ~/jyts/shared/.env        # 운영용 .env 작성 (아래 항목 참고)
 chmod 600 ~/jyts/shared/.env
+cp -a ~/www ~/www.bak-$(date +%Y%m%d)   # 기존 웹 폴더 내용 백업 (폴더 자체는 그대로 둠)
 ```
+
+첫 배포 때 `~/www/index.html`이 있으면 `index.html.bak-<시각>`으로 이름이 바뀝니다(`index.php`가 먼저 열리도록). `~/www`의 다른 파일은 건드리지 않습니다.
 
 운영용 `.env` 주요 값 (`backend/.env.example`을 복사해 수정):
 
@@ -316,7 +336,20 @@ SANCTUM_STATEFUL_DOMAINS=wkkim97b.mycafe24.com
 
 > 이미 운영 중인 `APP_KEY`가 있다면 그 값을 그대로 쓰세요. 바꾸면 기존 로그인 세션이 모두 끊깁니다.
 
-### 8-2. 처음 한 번: 배포용 SSH 키 만들기
+### 8-2. 처음 한 번: 서버 접속 방식 정하기 (공개키 권장)
+
+GitHub Actions가 Cafe24에 접속하는 방법은 두 가지입니다. **둘 중 하나만** 등록하면 됩니다(둘 다 있으면 공개키 사용).
+
+| | 공개키 (권장) | 비밀번호 |
+|---|---|---|
+| GitHub에 저장하는 것 | 배포 전용 비밀키 | Cafe24 SSH 비밀번호 |
+| 유출 시 피해 범위 | 서버 SSH 접속만. `authorized_keys`에서 한 줄 지우면 즉시 차단 | 같은 비밀번호를 쓰는 FTP 등도 위험. 비밀번호를 바꿔야 차단 |
+| Cafe24 비밀번호를 바꾸면 | 영향 없음 | GitHub Secret도 같이 바꿔야 배포됨 |
+| 추측/무차별 대입 | 사실상 불가능 | 비밀번호 강도에 달림 |
+| 준비 | 키 만들기 + 서버에 공개키 등록 (5분) | Secret 등록만 |
+| 기존 비밀번호 로그인 | 그대로 사용 가능 (공개키는 추가로 허용됨) | - |
+
+#### 방법 A. 공개키 (권장)
 
 내 PC(PowerShell)에서:
 
@@ -335,6 +368,12 @@ chmod 600 ~/.ssh/authorized_keys
 ```
 
 내 PC에서 키로 접속되는지 확인: `ssh -i $HOME\.ssh\jyts_deploy <아이디>@wkkim97b.mycafe24.com`
+(비밀번호를 묻지 않고 바로 들어가면 성공)
+
+#### 방법 B. 비밀번호
+
+키를 만들지 않고, 8-3에서 `DEPLOY_PASSWORD`에 Cafe24 SSH 비밀번호를 등록합니다.
+`known_hosts` 값은 똑같이 필요합니다: `ssh-keyscan -p 22 wkkim97b.mycafe24.com`
 
 ### 8-3. 처음 한 번: GitHub에 비밀값 등록
 
@@ -344,26 +383,16 @@ GitHub 저장소 → **Settings → Secrets and variables → Actions → New re
 |---|---|
 | `DEPLOY_HOST` | `wkkim97b.mycafe24.com` |
 | `DEPLOY_USER` | Cafe24 SSH 아이디 |
-| `DEPLOY_SSH_KEY` | `jyts_deploy` (비밀키, `.pub` 아님) 파일 내용 전체 |
+| `DEPLOY_SSH_KEY` | (방법 A) `jyts_deploy` (비밀키, `.pub` 아님) 파일 내용 전체 |
+| `DEPLOY_PASSWORD` | (방법 B) Cafe24 SSH 비밀번호 |
 | `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan` 출력 전체 |
 | `DEPLOY_PORT` | (선택) SSH 포트, 기본 22 |
 
-(선택) **Variables** 탭: `DEPLOY_APP_DIR`(기본 `jyts`), `DEPLOY_PHP_BIN`(기본 `/usr/local/php84/bin/php`)
+(선택) **Variables** 탭: `DEPLOY_APP_DIR`(기본 `jyts`), `DEPLOY_PHP_BIN`(기본 `/usr/local/php84/bin/php`), `DEPLOY_WEB_ROOT`(기본 `www`)
 
-> 비밀키 파일은 GitHub Secret에만 넣고 다른 곳(채팅, 문서, 저장소)에 올리지 마세요.
+> 비밀키와 비밀번호는 GitHub Secret에만 넣고 다른 곳(채팅, 문서, 저장소)에 올리지 마세요.
 
-### 8-4. 처음 한 번: 웹 루트 연결
-
-첫 자동 배포가 성공해 `~/jyts/current`가 생긴 뒤, Cafe24 SSH에서:
-
-```bash
-mv ~/www ~/www.bak-$(date +%Y%m%d)       # 기존 웹 폴더 백업
-ln -s ~/jyts/current/public ~/www        # 웹 루트를 Laravel public 으로 연결
-```
-
-브라우저에서 https://wkkim97b.mycafe24.com 이 열리는지 확인합니다. 이후 배포부터는 `current`만 바뀌므로 다시 할 필요가 없습니다.
-
-### 8-5. 배포하기
+### 8-4. 배포하기
 
 1. DB 구조 변경(migration)이 있다면 **먼저** 로컬에서 `php artisan migrate --pretend`로 SQL을 검토하고 적용합니다.
    적용하지 않은 migration이 남아 있으면 자동 배포가 일부러 실패합니다(서버는 바뀌지 않음).
@@ -371,16 +400,12 @@ ln -s ~/jyts/current/public ~/www        # 웹 루트를 Laravel public 으로 �
    (또는 터미널에서 `git push origin main:publish`)
 3. GitHub → **Actions** 탭에서 "Publish to Cafe24" 진행 상황을 확인합니다. 초록색 체크면 배포 완료입니다.
 4. Actions 탭의 **Run workflow** 버튼으로 다시 배포할 수도 있습니다.
+5. 브라우저에서 https://wkkim97b.mycafe24.com 이 열리고 로그인되는지 확인합니다.
 
-### 8-6. 문제가 생겨 이전 버전으로 되돌리기
+### 8-5. 문제가 생겨 이전 버전으로 되돌리기
 
-Cafe24 SSH에서:
-
-```bash
-ls -1t ~/jyts/releases                                   # 최신순 목록
-ln -sfn ~/jyts/releases/<되돌릴-버전> ~/jyts/current
-cd ~/jyts/current && /usr/local/php84/bin/php artisan config:cache
-```
+GitHub → **Actions** → "Publish to Cafe24" 목록에서 **정상이었던 이전 실행**을 열고 **Re-run all jobs**를 누릅니다.
+그 커밋으로 다시 빌드·배포되며 `~/www/index.php`와 화면 파일도 함께 되돌아갑니다.
 
 ---
 

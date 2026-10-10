@@ -15,6 +15,7 @@ permissions:
 env:
   APP_DIR: ${{ vars.DEPLOY_APP_DIR || 'jyts' }}
   PHP_BIN: ${{ vars.DEPLOY_PHP_BIN || '/usr/local/php84/bin/php' }}
+  WEB_ROOT: ${{ vars.DEPLOY_WEB_ROOT || 'www' }}
 
 jobs:
   build-and-deploy:
@@ -69,25 +70,44 @@ jobs:
       - name: Configure SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          if [ -n "$SSH_KEY" ]; then
+            printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+            chmod 600 ~/.ssh/deploy_key
+            echo "SSH_AUTH=key" >> "$GITHUB_ENV"
+          elif [ -n "$SSH_PASSWORD" ]; then
+            sudo apt-get install -y -qq sshpass > /dev/null
+            echo "SSH_AUTH=password" >> "$GITHUB_ENV"
+          else
+            echo "::error::DEPLOY_SSH_KEY 또는 DEPLOY_PASSWORD secret 을 등록하세요."
+            exit 1
+          fi
 
       - name: Upload and activate release
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
           USER: ${{ secrets.DEPLOY_USER }}
           PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
         run: |
           RELEASE="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
-          SSH_OPTS="-i ~/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=yes"
-          ssh $SSH_OPTS "$USER@$HOST" "mkdir -p \"\$HOME/$APP_DIR/incoming\""
-          scp -i ~/.ssh/deploy_key -P "$PORT" -o StrictHostKeyChecking=yes \
-            release.tar.gz .github/deploy/remote-release.sh "$USER@$HOST:$APP_DIR/incoming/"
-          ssh $SSH_OPTS "$USER@$HOST" "bash \"\$HOME/$APP_DIR/incoming/remote-release.sh\" '$APP_DIR' '$RELEASE' '$PHP_BIN'"
+          OPTS=(-o StrictHostKeyChecking=yes)
+          if [ "$SSH_AUTH" = key ]; then
+            OPTS+=(-i ~/.ssh/deploy_key -o BatchMode=yes)
+            run_ssh() { ssh "${OPTS[@]}" -p "$PORT" "$@"; }
+            run_scp() { scp "${OPTS[@]}" -P "$PORT" "$@"; }
+          else
+            OPTS+=(-o PreferredAuthentications=password -o PubkeyAuthentication=no)
+            run_ssh() { sshpass -e ssh "${OPTS[@]}" -p "$PORT" "$@"; }
+            run_scp() { sshpass -e scp "${OPTS[@]}" -P "$PORT" "$@"; }
+          fi
+          run_ssh "$USER@$HOST" "mkdir -p \"\$HOME/$APP_DIR/incoming\""
+          run_scp release.tar.gz .github/deploy/remote-release.sh .github/deploy/www-index.php "$USER@$HOST:$APP_DIR/incoming/"
+          run_ssh "$USER@$HOST" "bash \"\$HOME/$APP_DIR/incoming/remote-release.sh\" '$APP_DIR' '$RELEASE' '$PHP_BIN' '$WEB_ROOT'"
 
       - name: Remove SSH key
         if: always()
