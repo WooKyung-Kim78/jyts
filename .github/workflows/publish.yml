@@ -1,0 +1,114 @@
+name: Publish to Cafe24
+
+on:
+  push:
+    branches: [publish]
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  APP_DIR: ${{ vars.DEPLOY_APP_DIR || 'jyts' }}
+  PHP_BIN: ${{ vars.DEPLOY_PHP_BIN || '/usr/local/php84/bin/php' }}
+  WEB_ROOT: ${{ vars.DEPLOY_WEB_ROOT || 'www' }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo_sqlite, sqlite3, fileinfo, intl, zip
+          coverage: none
+
+      - name: Install frontend packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint and build frontend
+        run: |
+          pnpm lint
+          pnpm build
+
+      - name: Backend tests (SQLite in-memory)
+        working-directory: backend
+        run: |
+          composer install --no-interaction --no-progress --prefer-dist
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+          php artisan test
+          rm .env
+
+      - name: Install production PHP packages
+        working-directory: backend
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Package release
+        run: |
+          tar -czf release.tar.gz -C backend \
+            --exclude='./.env' --exclude='./.env.*' \
+            --exclude='./tests' --exclude='./storage' \
+            --exclude='./node_modules' --exclude='./.phpunit.cache' \
+            --exclude='./bootstrap/cache/*.php' \
+            .
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          if [ -n "$SSH_KEY" ]; then
+            printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+            chmod 600 ~/.ssh/deploy_key
+            echo "SSH_AUTH=key" >> "$GITHUB_ENV"
+          elif [ -n "$SSH_PASSWORD" ]; then
+            sudo apt-get install -y -qq sshpass > /dev/null
+            echo "SSH_AUTH=password" >> "$GITHUB_ENV"
+          else
+            echo "::error::DEPLOY_SSH_KEY 또는 DEPLOY_PASSWORD secret 을 등록하세요."
+            exit 1
+          fi
+
+      - name: Upload and activate release
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          RELEASE="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          OPTS=(-o StrictHostKeyChecking=yes)
+          if [ "$SSH_AUTH" = key ]; then
+            OPTS+=(-i ~/.ssh/deploy_key -o BatchMode=yes)
+            run_ssh() { ssh "${OPTS[@]}" -p "$PORT" "$@"; }
+            run_scp() { scp "${OPTS[@]}" -P "$PORT" "$@"; }
+          else
+            OPTS+=(-o PreferredAuthentications=password -o PubkeyAuthentication=no)
+            run_ssh() { sshpass -e ssh "${OPTS[@]}" -p "$PORT" "$@"; }
+            run_scp() { sshpass -e scp "${OPTS[@]}" -P "$PORT" "$@"; }
+          fi
+          run_ssh "$USER@$HOST" "mkdir -p \"\$HOME/$APP_DIR/incoming\""
+          run_scp release.tar.gz .github/deploy/remote-release.sh .github/deploy/www-index.php "$USER@$HOST:$APP_DIR/incoming/"
+          run_ssh "$USER@$HOST" "bash \"\$HOME/$APP_DIR/incoming/remote-release.sh\" '$APP_DIR' '$RELEASE' '$PHP_BIN' '$WEB_ROOT'"
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
