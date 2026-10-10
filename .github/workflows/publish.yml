@@ -72,16 +72,29 @@ jobs:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          RAW_HOST: ${{ secrets.DEPLOY_HOST }}
+          RAW_USER: ${{ secrets.DEPLOY_USER }}
+          RAW_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
         run: |
+          # Secrets pasted with stray spaces/newlines would otherwise break DNS lookup and SSH login.
+          HOST="$(printf '%s' "$RAW_HOST" | tr -d '[:space:]')"
+          USER_NAME="$(printf '%s' "$RAW_USER" | tr -d '[:space:]')"
+          PORT="$(printf '%s' "$RAW_PORT" | tr -d '[:space:]')"
+          { echo "SSH_HOST=$HOST"; echo "SSH_USER=$USER_NAME"; echo "SSH_PORT=$PORT"; } >> "$GITHUB_ENV"
           install -m 700 -d ~/.ssh
           # Values pasted on Windows carry CRLF, which makes every known_hosts line unparsable.
           printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' | grep -v '^#' > ~/.ssh/known_hosts || true
           LOOKUP="$HOST"
           [ "$PORT" = 22 ] || LOOKUP="[$HOST]:$PORT"
           if ! timeout 15 bash -c ": </dev/tcp/$HOST/$PORT" 2>/dev/null; then
-            echo "::error::GitHub Actions(해외 서버)에서 DEPLOY_HOST 의 SSH 포트로 연결할 수 없습니다. Cafe24 '해외 IP 접속 차단'(SSH/FTP) 설정과 DEPLOY_PORT 값을 확인하세요."
+            echo "::error::GitHub Actions(해외 서버)에서 DEPLOY_HOST 의 SSH 포트로 연결할 수 없습니다."
+            echo "DEPLOY_HOST 글자 수: ${#HOST} (wkkim97b.mycafe24.com 이면 21)"
+            echo "확인된 IPv4 주소 수: $(getent ahostsv4 "$HOST" | awk '{print $1}' | sort -u | wc -l)"
+            if timeout 10 bash -c ": </dev/tcp/$HOST/443" 2>/dev/null; then
+              echo "HTTPS(443) 연결 성공 → 주소는 맞고, SSH(${PORT}) 포트만 해외/클라우드 IP 에서 막혀 있습니다."
+            else
+              echo "HTTPS(443) 연결도 실패 → DEPLOY_HOST 값이 잘못되었을 가능성이 큽니다."
+            fi
             exit 1
           fi
           if ! ssh-keygen -F "$LOOKUP" -f ~/.ssh/known_hosts > /dev/null; then
@@ -105,11 +118,11 @@ jobs:
 
       - name: Upload and activate release
         env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
         run: |
+          HOST="$SSH_HOST"
+          USER="$SSH_USER"
+          PORT="$SSH_PORT"
           RELEASE="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
           OPTS=(-o StrictHostKeyChecking=yes)
           if [ "$SSH_AUTH" = key ]; then
