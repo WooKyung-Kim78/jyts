@@ -1,0 +1,114 @@
+@page {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
+.history-info-label {
+  display: flex;
+  align-items: center;
+  background: #edf1e2;
+  border-right: 1px solid #cbd5e1;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #243247;
+}
+
+.history-empty {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.history-matrix th,
+.history-matrix td,
+.history-maintenance-table th,
+.history-maintenance-table td {
+  border: 1px solid #cbd5e1;
+  padding: 5px 6px;
+  vertical-align: top;
+}
+
+.history-matrix thead th,
+.history-maintenance-table thead th {
+  background: #edf1e2;
+  color: #243247;
+  font-weight: 700;
+}
+
+.history-matrix tbody th {
+  width: 35%;
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    color: #0f172a !important;
+    font-size: 9pt !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body:has(.history-print-page) aside,
+  body:has(.history-print-page) .app-shell-header,
+  .history-screen-only {
+    display: none !important;
+  }
+
+  body:has(.history-print-page) main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .equipment-history-card {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    gap: 0 !important;
+  }
+
+  .history-print-page {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    gap: 0 !important;
+  }
+
+  .history-card-page-break {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .history-print-sheet {
+    width: 100% !important;
+    border: 1px solid #64748b !important;
+    box-shadow: none !important;
+  }
+
+  .history-section,
+  .history-matrix,
+  .history-maintenance-table,
+  .history-photo,
+  .history-map-image {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .history-map-image {
+    max-height: 34mm !important;
+  }
+
+  .history-photo {
+    max-height: 28mm !important;
+  }
+
+  .history-info-label,
+  .history-matrix thead th,
+  .history-maintenance-table thead th {
+    background: #edf1e2 !important;
+  }
+}
