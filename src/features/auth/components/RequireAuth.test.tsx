@@ -60,21 +60,23 @@ describe('authentication guard', () => {
 })
 
 describe('role based access', () => {
-  it('hides the admin menu and blocks /admin for USER', async () => {
-    renderRoute('/admin', { auth: activeAuth('USER') })
+  it('hides the admin menu and blocks admin pages for USER', async () => {
+    renderRoute('/employees', { auth: activeAuth('USER') })
 
     expect(await screen.findByRole('heading', { level: 1, name: '접근 권한이 없습니다' })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: '주 메뉴' })
-    expect(within(nav).queryByRole('link', { name: '관리' })).not.toBeInTheDocument()
+    expect(within(nav).queryByRole('button', { name: '관리' })).not.toBeInTheDocument()
+    expect(within(nav).queryByRole('link', { name: '직원 관리' })).not.toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: '장비' })).toBeInTheDocument()
   })
 
   it('allows ADMIN to open the admin menu', async () => {
-    renderRoute('/admin', { auth: activeAuth('ADMIN') })
+    renderRoute('/employees', { auth: activeAuth('ADMIN') })
 
-    expect(await screen.findByRole('heading', { level: 1, name: '관리' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: '직원 관리' }, { timeout: 10000 })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: '주 메뉴' })
-    expect(within(nav).getByRole('link', { name: '관리' })).toBeInTheDocument()
+    expect(within(nav).getByRole('button', { name: '관리' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(nav).getByRole('link', { name: '직원 관리' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('shows the signed-in user and role, and signs out from the header', async () => {
@@ -83,8 +85,13 @@ describe('role based access', () => {
     renderRoute('/', { auth })
 
     await screen.findByRole('heading', { level: 1, name: '대시보드' })
-    expect(screen.getByText('테스트 사용자')).toBeInTheDocument()
-    expect(screen.getByText('사용자')).toBeInTheDocument()
+    const menuButton = screen.getByRole('button', { name: '테스트 사용자' })
+    expect(screen.queryByRole('button', { name: '로그아웃' })).not.toBeInTheDocument()
+
+    await user.click(menuButton)
+    expect(menuButton).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('권한: 사용자')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '비밀번호 변경' })).toHaveAttribute('href', '/account/password')
 
     await user.click(screen.getByRole('button', { name: '로그아웃' }))
     expect(auth.signOut).toHaveBeenCalledOnce()

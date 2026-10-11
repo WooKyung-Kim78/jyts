@@ -27,6 +27,7 @@ class EquipmentResource extends JsonResource
             'name' => $this->name,
             'category' => $this->category,
             'status' => $this->status,
+            'inspection_cycle' => $this->inspection_cycle,
             'specifics' => $this->specifics,
             'assigned_user_id' => $this->assigned_user_id ? (string) $this->assigned_user_id : null,
             'assigned_user' => $this->whenLoaded('assignedUser', fn () => $this->assignedUser ? [

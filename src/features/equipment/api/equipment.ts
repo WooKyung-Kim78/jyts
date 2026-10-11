@@ -17,6 +17,29 @@ export const EQUIPMENT_CATEGORY_LABELS: Record<(typeof EQUIPMENT_CATEGORIES)[num
   VOICE_ALARM: '음성통보기',
 }
 
+export const EQUIPMENT_STATUSES = ['ACTIVE', 'INSPECTION_REQUIRED', 'OUT_OF_SERVICE', 'DISPOSED'] as const
+
+export const EQUIPMENT_STATUS_LABELS: Record<(typeof EQUIPMENT_STATUSES)[number], string> = {
+  ACTIVE: '정상',
+  INSPECTION_REQUIRED: '점검 필요',
+  OUT_OF_SERVICE: '장애',
+  DISPOSED: '폐기',
+}
+
+export const EQUIPMENT_INSPECTION_CYCLES = ['MONTHLY', 'QUARTERLY', 'YEARLY', 'ON_REQUEST'] as const
+
+export const EQUIPMENT_INSPECTION_CYCLE_LABELS: Record<(typeof EQUIPMENT_INSPECTION_CYCLES)[number], string> = {
+  MONTHLY: '월',
+  QUARTERLY: '분기',
+  YEARLY: '년',
+  ON_REQUEST: '요청',
+}
+
+export function inspectionCycleLabel(cycle: string | null | undefined): string {
+  const match = EQUIPMENT_INSPECTION_CYCLES.find((value) => value === cycle)
+  return match ? EQUIPMENT_INSPECTION_CYCLE_LABELS[match] : '미지정'
+}
+
 export const equipmentMasterFieldSchema = z.object({
   id: z.uuid(),
   category: z.enum(EQUIPMENT_CATEGORIES),
@@ -58,7 +81,8 @@ export const equipmentSchema = z.object({
   equipment_code: z.string(),
   name: z.string(),
   category: z.enum(EQUIPMENT_CATEGORIES),
-  status: z.enum(['ACTIVE', 'INSPECTION_REQUIRED', 'OUT_OF_SERVICE', 'DISPOSED']),
+  status: z.enum(EQUIPMENT_STATUSES),
+  inspection_cycle: z.enum(EQUIPMENT_INSPECTION_CYCLES).nullable(),
   specifics: z.string().nullable(),
   assigned_user_id: z.string().nullable(),
   assigned_user: z.object({
@@ -82,6 +106,8 @@ export const equipmentMasterFieldInputSchema = z.object({
 })
 
 export type EquipmentCategory = (typeof EQUIPMENT_CATEGORIES)[number]
+export type EquipmentStatus = (typeof EQUIPMENT_STATUSES)[number]
+export type InspectionCycle = (typeof EQUIPMENT_INSPECTION_CYCLES)[number]
 export type Equipment = z.infer<typeof equipmentSchema>
 export type EquipmentAttribute = z.infer<typeof equipmentAttributeSchema>
 export type EquipmentPhoto = z.infer<typeof equipmentPhotoSchema>
@@ -92,6 +118,7 @@ export type EquipmentInput = {
   equipment_code: string
   name: string
   category: EquipmentCategory
+  inspection_cycle: InspectionCycle
   specifics: string | null
   assigned_user_id: string | null
   master_values: Record<string, string | null>
@@ -131,6 +158,8 @@ export async function createEquipment(input: EquipmentInput, photos: File[] = []
   body.append('equipment_code', input.equipment_code)
   body.append('name', input.name)
   body.append('category', input.category)
+  body.append('inspection_cycle', input.inspection_cycle)
+  if (input.assigned_user_id) body.append('assigned_user_id', input.assigned_user_id)
   if (input.specifics !== null) body.append('specifics', input.specifics)
 
   for (const [fieldId, value] of Object.entries(input.master_values)) {
@@ -176,6 +205,7 @@ export async function updateEquipment(
     organization_id: string
     equipment_code: string
     name: string
+    inspection_cycle: InspectionCycle
     specifics: string | null
     assigned_user_id: string | null
     attribute_values: Record<string, string | null>

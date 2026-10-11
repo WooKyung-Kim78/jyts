@@ -41,6 +41,9 @@ class InspectionResource extends JsonResource
             'completed_at' => $this->completed_at?->toISOString(),
             'emailed_at' => $this->emailed_at?->toISOString(),
             'remarks' => $this->remarks,
+            'has_bad_result' => $this->relationLoaded('items')
+                ? $this->items->contains('result', 'BAD')
+                : (bool) $this->resource->getAttribute('has_bad_result'),
             'created_by' => ['id' => (string) $this->created_by, 'name' => $this->creator?->name],
             'can_edit' => $request->user()?->can('update', $this->resource) ?? false,
             'can_delete' => $request->user()?->can('delete', $this->resource) ?? false,

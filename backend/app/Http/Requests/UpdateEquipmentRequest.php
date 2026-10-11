@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Equipment;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -26,6 +27,7 @@ class UpdateEquipmentRequest extends FormRequest
                 Rule::unique('equipment', 'equipment_code')->whereNull('deleted_at')->ignore($equipment?->id),
             ],
             'name' => ['required', 'string', 'max:150'],
+            'inspection_cycle' => ['sometimes', 'required', Rule::in(Equipment::INSPECTION_CYCLES)],
             'assigned_user_id' => [
                 'sometimes',
                 'nullable',

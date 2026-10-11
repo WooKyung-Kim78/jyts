@@ -48,6 +48,7 @@ export const inspectionSchema = z.object({
   completed_at: z.string().nullable(),
   emailed_at: z.string().nullable(),
   remarks: z.string().nullable(),
+  has_bad_result: z.boolean().optional(),
   created_by: z.object({ id: z.string(), name: z.string().nullable() }),
   can_edit: z.boolean(),
   can_delete: z.boolean(),
@@ -84,12 +85,34 @@ const inspectionPageSchema = z.object({
 
 export type InspectionPage = z.infer<typeof inspectionPageSchema>
 
-export async function getInspections(filters: { equipment_id?: string; status?: Inspection['status']; page?: number }): Promise<InspectionPage> {
+export type InspectionListFilters = {
+  equipment_id?: string
+  status?: Inspection['status']
+  page?: number
+  inspected_from?: string
+  inspected_to?: string
+}
+
+export async function getInspections(filters: InspectionListFilters): Promise<InspectionPage> {
   const query = new URLSearchParams()
   if (filters.equipment_id) query.set('equipment_id', filters.equipment_id)
   if (filters.status) query.set('status', filters.status)
+  if (filters.inspected_from) query.set('inspected_from', filters.inspected_from)
+  if (filters.inspected_to) query.set('inspected_to', filters.inspected_to)
   if (filters.page && filters.page > 1) query.set('page', String(filters.page))
   return inspectionPageSchema.parse(await apiRequest<unknown>(`/api/inspections?${query.toString()}`))
+}
+
+const MAX_LIST_PAGES = 50
+
+export async function getAllInspections(filters: Omit<InspectionListFilters, 'page'>): Promise<Inspection[]> {
+  const first = await getInspections(filters)
+  const items = [...first.items]
+  const lastPage = Math.min(first.meta.last_page, MAX_LIST_PAGES)
+  for (let page = 2; page <= lastPage; page += 1) {
+    items.push(...(await getInspections({ ...filters, page })).items)
+  }
+  return items
 }
 
 export async function startInspection(equipmentId: string): Promise<Inspection> {

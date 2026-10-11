@@ -269,6 +269,28 @@ class InspectionTest extends TestCase
         $this->getJson('/api/inspections?page=0')->assertUnprocessable();
     }
 
+    public function test_list_filters_by_inspection_date_range_and_flags_bad_results(): void
+    {
+        $user = $this->createUser('USER');
+        $inRange = $this->startInspection($user);
+        $inRange->forceFill(['inspected_on' => '2026-10-05'])->save();
+        $inRange->items()->orderBy('sort_order')->firstOrFail()->forceFill(['result' => 'BAD'])->save();
+        $outOfRange = $this->startInspection($user);
+        $outOfRange->forceFill(['inspected_on' => '2026-09-30'])->save();
+
+        $this->actAs($user)->getJson('/api/inspections?inspected_from=2026-10-01&inspected_to=2026-10-31')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.id', $inRange->id)
+            ->assertJsonPath('data.items.0.has_bad_result', true);
+        $this->getJson('/api/inspections?inspected_from=2026-09-01&inspected_to=2026-09-30')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.id', $outOfRange->id)
+            ->assertJsonPath('data.items.0.has_bad_result', false);
+        $this->getJson('/api/inspections?inspected_from=2026-10-31&inspected_to=2026-10-01')->assertUnprocessable();
+        $this->getJson('/api/inspections?inspected_from=2026/10/01')->assertUnprocessable();
+    }
+
     public function test_author_or_admin_can_delete_draft_or_completed_inspection_before_email(): void
     {
         $author = $this->createUser('USER');

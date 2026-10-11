@@ -25,6 +25,13 @@ vi.mock('./api/equipment', async (importOriginal) => ({
   ...api,
 }))
 
+const inspectionApi = vi.hoisted(() => ({ getInspections: vi.fn() }))
+
+vi.mock('@/features/inspections/api/inspections', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/features/inspections/api/inspections')>(),
+  ...inspectionApi,
+}))
+
 vi.mock('@/features/organizations/api/organizations', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/features/organizations/api/organizations')>(),
   getOrganizations: vi.fn(async () => [
@@ -74,6 +81,7 @@ const equipment = {
   name: 'UPS 1호기',
   category: 'UPS' as const,
   status: 'ACTIVE' as const,
+  inspection_cycle: 'MONTHLY' as const,
   specifics: null,
   assigned_user_id: '22',
   assigned_user: { id: '22', name: '장비 담당 직원', active: true },
@@ -99,6 +107,62 @@ describe('equipment pages', () => {
     api.copyEquipment.mockResolvedValue(equipment)
     api.uploadEquipmentPhoto.mockResolvedValue(undefined)
     api.deleteEquipmentPhoto.mockResolvedValue(undefined)
+    inspectionApi.getInspections.mockResolvedValue({ items: [], meta: { current_page: 1, last_page: 1, per_page: 100, total: 0 } })
+  })
+
+  it('filters the list by status from the URL and shows status badges', async () => {
+    api.getEquipment.mockResolvedValue([
+      equipment,
+      { ...equipment, id: '00000000-0000-4000-8000-000000000009', name: 'UPS 장애기', equipment_code: 'JY-UPS-009', status: 'OUT_OF_SERVICE' as const },
+    ])
+    renderRoute('/equipment?status=OUT_OF_SERVICE', { auth: activeAuth('USER') })
+
+    const table = await screen.findByRole('table', { name: '장비 목록' })
+    expect(within(table).getByRole('link', { name: 'UPS 장애기' })).toHaveAttribute('href', '/equipment/00000000-0000-4000-8000-000000000009')
+    expect(within(table).getByText('장애')).toBeInTheDocument()
+    expect(within(table).queryByText('UPS 1호기')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('상태')).toHaveValue('OUT_OF_SERVICE')
+  })
+
+  it('shows equipment detail with tabs and a newest-first inspection timeline', async () => {
+    const user = userEvent.setup()
+    const inspectionBase = {
+      equipment_id: equipment.id,
+      equipment: null,
+      category: 'UPS' as const,
+      emailed_at: null,
+      created_by: { id: '22', name: '점검 직원' },
+      can_edit: true,
+      can_delete: false,
+      created_at: null,
+      updated_at: null,
+    }
+    inspectionApi.getInspections.mockResolvedValue({
+      items: [
+        { ...inspectionBase, id: '00000000-0000-4000-8000-000000000031', status: 'DRAFT' as const, inspected_on: '2026-10-10', completed_at: null, remarks: null },
+        { ...inspectionBase, id: '00000000-0000-4000-8000-000000000032', status: 'COMPLETED' as const, inspected_on: '2026-09-01', completed_at: '2026-09-01T10:00:00+09:00', remarks: '필터 교체 권고' },
+      ],
+      meta: { current_page: 1, last_page: 1, per_page: 100, total: 2 },
+    })
+    renderRoute(`/equipment/${equipment.id}`, { auth: activeAuth('USER') })
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'UPS 1호기' })).toBeInTheDocument()
+    expect(screen.getByText('정상')).toBeInTheDocument()
+    expect(await screen.findByText('2026-09-01')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /점검 이력 추가/ })[0]).toHaveAttribute('href', `/inspections/new?equipment_id=${equipment.id}`)
+    expect(screen.getByRole('button', { name: /수리 이력 추가/ })).toBeDisabled()
+
+    await user.click(screen.getByRole('tab', { name: /점검이력/ }))
+    const timeline = await screen.findByRole('list', { name: '점검 이력' })
+    const entries = within(timeline).getAllByRole('listitem')
+    expect(entries).toHaveLength(2)
+    expect(within(entries[0]!).getByRole('link', { name: '이어서 작성' })).toHaveAttribute('href', '/inspections/00000000-0000-4000-8000-000000000031')
+    expect(within(entries[1]!).getByText('필터 교체 권고')).toBeInTheDocument()
+    expect(within(entries[1]!).getByRole('link', { name: '점검일지 보기' })).toHaveAttribute('href', '/inspections/00000000-0000-4000-8000-000000000032/report')
+
+    await user.click(screen.getByRole('tab', { name: /첨부파일/ }))
+    expect(await screen.findByText('등록된 첨부파일이 없습니다.')).toBeInTheDocument()
+    expect(inspectionApi.getInspections).toHaveBeenCalledWith({ equipment_id: equipment.id, page: 1 })
   })
 
   it('shows the requested customer installation columns on the list page', async () => {
@@ -126,6 +190,7 @@ describe('equipment pages', () => {
     await user.type(screen.getByLabelText('장비 코드'), 'JY-UPS-002')
     await user.type(screen.getByLabelText('장비명'), 'UPS 2호기')
     await user.selectOptions(screen.getByLabelText('담당 직원'), '22')
+    await user.selectOptions(screen.getByLabelText('정기점검 주기'), 'QUARTERLY')
     await user.type(screen.getByLabelText(/정격 용량/), '120')
     await user.type(screen.getByLabelText('특이사항'), '현장 메모')
     const photo = new File(['photo-data'], 'ups.png', { type: 'image/png' })
@@ -137,6 +202,7 @@ describe('equipment pages', () => {
       equipment_code: 'JY-UPS-002',
       name: 'UPS 2호기',
       category: 'UPS',
+      inspection_cycle: 'QUARTERLY',
       specifics: '현장 메모',
       assigned_user_id: '22',
       master_values: { [masterField.id]: '120' },
@@ -239,6 +305,21 @@ describe('equipment pages', () => {
     })
   })
 
+  it('requires an inspection cycle before saving equipment without one', async () => {
+    const user = userEvent.setup()
+    api.getEquipmentById.mockResolvedValue({ ...equipment, inspection_cycle: null })
+    renderRoute(`/equipment/${equipment.id}/edit`, { auth: activeAuth('USER') })
+
+    expect(await screen.findByLabelText('정기점검 주기')).toHaveValue('')
+    await user.click(screen.getByRole('button', { name: '장비 수정' }))
+    expect(await screen.findByText('정기점검 주기를 선택하세요.')).toBeInTheDocument()
+    expect(api.updateEquipment).not.toHaveBeenCalled()
+
+    await user.selectOptions(screen.getByLabelText('정기점검 주기'), 'YEARLY')
+    await user.click(screen.getByRole('button', { name: '장비 수정' }))
+    await waitFor(() => expect(api.updateEquipment.mock.calls[0]?.[1]).toMatchObject({ inspection_cycle: 'YEARLY' }))
+  })
+
   it('updates an existing equipment from its dedicated edit page', async () => {
     const user = userEvent.setup()
     const equipmentWithField = {
@@ -274,6 +355,7 @@ describe('equipment pages', () => {
       name: 'UPS 변경명',
       specifics: '수정 메모',
       assigned_user_id: '22',
+      inspection_cycle: 'MONTHLY',
       attribute_values: { [masterField.id]: '120' },
     })
   })

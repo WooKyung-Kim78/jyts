@@ -5,28 +5,42 @@ import { describe, expect, it } from 'vitest'
 import { createAuthValue } from '@/test/auth'
 import { renderRoute } from '@/test/render'
 
-const menuLabels = ['대시보드', '고객사', '장비', '장비 마스터', '정기점검 입력', '정기점검', '점검일지 마스터', '직원 관리', 'A/S', '관리']
+const menuLabels = ['대시보드', '정기점검 입력', '정기점검 리스트', '고객사', '장비']
+const adminMenuLabels = ['직원 관리', '장비 마스터', '점검일지 마스터']
 
 describe('application routes', () => {
   it('renders the dashboard inside the layout with the main navigation', async () => {
+    const user = userEvent.setup()
     renderRoute('/')
 
     expect(await screen.findByRole('heading', { level: 1, name: '대시보드' })).toBeInTheDocument()
 
     const nav = screen.getByRole('navigation', { name: '주 메뉴' })
-    const links = within(nav).getAllByRole('link')
-    expect(links.map((link) => link.textContent)).toEqual(menuLabels)
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(menuLabels)
     expect(within(nav).getByRole('link', { name: '대시보드' })).toHaveAttribute('aria-current', 'page')
+
+    const adminGroup = within(nav).getByRole('button', { name: '관리' })
+    expect(adminGroup).toHaveAttribute('aria-expanded', 'false')
+    await user.click(adminGroup)
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual([...menuLabels, ...adminMenuLabels])
   })
 
-  it.each([
-    ['/service-requests', 'A/S'],
-    ['/admin', '관리'],
-  ])('renders a coming-soon placeholder for %s', async (path, title) => {
-    renderRoute(path)
+  it('opens the admin group when one of its pages is active', async () => {
+    renderRoute('/equipment/master')
 
-    expect(await screen.findByRole('heading', { level: 1, name: title })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: '장비 마스터' })).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: '주 메뉴' })
+    expect(within(nav).getByRole('button', { name: '관리' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(nav).getByRole('link', { name: '장비 마스터' })).toHaveAttribute('aria-current', 'page')
+    expect(within(nav).getByRole('link', { name: '장비' }).className).not.toMatch(/(^|\s)bg-primary(\s|$)/)
+  })
+
+  it('renders a coming-soon placeholder for A/S without showing it in the menu', async () => {
+    renderRoute('/service-requests')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'A/S' })).toBeInTheDocument()
     expect(screen.getByText('준비 중')).toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: '주 메뉴' })).queryByRole('link', { name: 'A/S' })).not.toBeInTheDocument()
   })
 
   it('opens the equipment registration and master pages', async () => {

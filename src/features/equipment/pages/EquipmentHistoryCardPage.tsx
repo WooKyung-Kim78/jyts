@@ -4,13 +4,16 @@ import { ArrowLeft, Printer } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/feedback/LoadingState'
+import { getInspections, inspectionStatusLabel } from '@/features/inspections/api/inspections'
 import { ApiError } from '@/lib/api/client'
-import { EQUIPMENT_CATEGORY_LABELS, getEquipmentById, type Equipment, type EquipmentAttribute } from '../api/equipment'
+import { EQUIPMENT_CATEGORY_LABELS, getEquipmentById, inspectionCycleLabel, type Equipment, type EquipmentAttribute } from '../api/equipment'
+import { EquipmentStatusBadge } from '../components/EquipmentStatusBadge'
 import './equipment-history-card.css'
 
 const breakerSlots = ['Main', 'Blower', 'Comp', 'Heater', 'Humi']
 const magnetSlots = ['Blower', 'Comp', 'Fan', 'Heater', 'Humi']
 const eocrSlots = ['Blower', 'Comp', 'Fan']
+const MAINTENANCE_ROW_LIMIT = 12
 
 export function EquipmentHistoryCardPage() {
   const { equipmentId } = useParams()
@@ -28,11 +31,12 @@ export function EquipmentHistoryCardPage() {
   const equipment = query.data
 
   return (
-    <main className="history-print-page equipment-history-card mx-auto flex w-full max-w-5xl flex-col gap-3 text-slate-900">
+    <main className="history-print-page equipment-history-card mx-auto flex w-full max-w-[210mm] flex-col gap-3 text-slate-900">
       <div className="history-screen-only flex items-center justify-between gap-2">
-        <Button asChild variant="outline"><Link to={`/equipment/${equipment.id}/edit`}><ArrowLeft aria-hidden="true" />장비로 돌아가기</Link></Button>
+        <Button asChild variant="outline"><Link to={`/equipment/${equipment.id}`}><ArrowLeft aria-hidden="true" />장비로 돌아가기</Link></Button>
         <Button type="button" onClick={() => window.print()}><Printer aria-hidden="true" />장비이력카드 인쇄</Button>
       </div>
+      <p className="history-screen-only text-xs text-muted-foreground">A4 세로 용지에 맞춘 미리보기입니다. 인쇄 설정에서 ‘배경 그래픽’을 켜면 색상이 함께 출력됩니다.</p>
       <EquipmentHistoryCardDocument equipment={equipment} />
     </main>
   )
@@ -40,8 +44,8 @@ export function EquipmentHistoryCardPage() {
 
 export function EquipmentHistoryCardDocument({ equipment, pageBreakBefore = false }: { equipment: Equipment; pageBreakBefore?: boolean }) {
   return (
-      <article className={`history-print-sheet overflow-hidden border border-slate-300 bg-white${pageBreakBefore ? ' history-card-page-break' : ''}`}>
-        <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b-2 border-slate-800 bg-slate-900 px-4 py-3 text-white">
+      <article className={`history-print-sheet overflow-hidden border border-slate-300 bg-white shadow-sm${pageBreakBefore ? ' history-card-page-break' : ''}`}>
+        <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b-2 border-[#13244a] bg-[#1b2f5c] px-4 py-3 text-white">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-200">Equipment record</p>
             <h1 className="mt-1 text-xl font-bold">장비이력카드</h1>
@@ -53,16 +57,23 @@ export function EquipmentHistoryCardDocument({ equipment, pageBreakBefore = fals
         </header>
 
         <section aria-labelledby="history-customer-heading" className="history-section border-b border-slate-300">
-          <SectionHeading id="history-customer-heading" title="고객사 정보" />
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1.6fr_1.3fr]">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-300 bg-slate-100 px-3 py-1">
+            <h2 id="history-customer-heading" className="text-xs font-bold text-slate-800">고객사 정보</h2>
+            <p className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-700">
+              설치 상태 <EquipmentStatusBadge status={equipment.status} className="px-1.5 py-0 text-[10px]" />
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2">
             <InfoCell label="고객사명" value={equipment.organization_name} />
             <InfoCell label="담당자" value={equipment.organization_contact_name} />
+          </div>
+          <div className="grid grid-cols-1 border-t border-slate-200 sm:grid-cols-2">
             <InfoCell label="전화번호" value={equipment.organization_contact_phone} />
             <InfoCell label="주소" value={equipment.organization_address} />
           </div>
-          <div className="grid grid-cols-1 border-t border-slate-200 sm:grid-cols-[1.3fr_1fr]">
+          <div className="grid grid-cols-1 border-t border-slate-200 sm:grid-cols-2">
             <InfoCell label="장비명" value={equipment.name} />
-            <InfoCell label="설치 상태" value={getStatusLabel(equipment.status)} />
+            <InfoCell label="점검주기" value={inspectionCycleLabel(equipment.inspection_cycle)} />
           </div>
           <div className="grid grid-cols-[78px_1fr] border-t border-slate-200">
             <div className="history-info-label">지도</div>
@@ -94,16 +105,7 @@ export function EquipmentHistoryCardDocument({ equipment, pageBreakBefore = fals
 
         <section aria-labelledby="history-maintenance-heading" className="history-section">
           <SectionHeading id="history-maintenance-heading" title="유지보수 이력" />
-          <table aria-label="유지보수 이력" className="history-maintenance-table w-full border-collapse text-left text-[10px]">
-            <thead>
-              <tr>
-                <th>작업일자</th><th>작업구분</th><th>작업내용</th><th>작업자</th><th>교체부품</th><th>비고</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td colSpan={6} className="py-3 text-center text-slate-500">등록된 유지보수 이력이 없습니다.</td></tr>
-            </tbody>
-          </table>
+          <MaintenanceHistory equipmentId={equipment.id} />
         </section>
 
         <footer className="border-t border-slate-300 px-3 py-2 text-right text-[9px] text-slate-500">
@@ -115,6 +117,37 @@ export function EquipmentHistoryCardDocument({ equipment, pageBreakBefore = fals
 
 function SectionHeading({ id, title }: { id: string; title: string }) {
   return <h2 id={id} className="border-b border-slate-300 bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-800">{title}</h2>
+}
+
+function MaintenanceHistory({ equipmentId }: { equipmentId: string }) {
+  const inspections = useQuery({
+    queryKey: ['inspections', { equipment_id: equipmentId, page: 1 }],
+    queryFn: () => getInspections({ equipment_id: equipmentId, page: 1 }),
+  })
+  const completed = (inspections.data?.items ?? []).filter((inspection) => inspection.status === 'COMPLETED')
+  const rows = completed.slice(0, MAINTENANCE_ROW_LIMIT)
+  const emptyMessage = inspections.isPending
+    ? '유지보수 이력을 불러오는 중입니다.'
+    : inspections.isError ? '유지보수 이력을 불러오지 못했습니다.' : '등록된 유지보수 이력이 없습니다.'
+
+  return <table aria-label="유지보수 이력" className="history-maintenance-table w-full border-collapse text-left text-[10px]">
+    <thead>
+      <tr>
+        <th className="w-[14%]">작업일자</th><th className="w-[11%]">작업구분</th><th>작업내용</th><th className="w-[12%]">작업자</th><th className="w-[12%]">교체부품</th><th className="w-[24%]">비고</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.length ? rows.map((inspection) => <tr key={inspection.id}>
+        <td className="tabular-nums">{inspection.inspected_on ?? '-'}</td>
+        <td>정기점검</td>
+        <td>정기점검 {inspectionStatusLabel(inspection)}</td>
+        <td>{inspection.created_by.name ?? '-'}</td>
+        <td>-</td>
+        <td className="whitespace-pre-wrap">{inspection.remarks || '-'}</td>
+      </tr>) : <tr><td colSpan={6} className="py-3 text-center text-slate-500">{emptyMessage}</td></tr>}
+      {completed.length > rows.length && <tr><td colSpan={6} className="text-right text-slate-500">외 {completed.length - rows.length}건 (최근 {rows.length}건만 표시)</td></tr>}
+    </tbody>
+  </table>
 }
 
 function InfoCell({ label, value }: { label: string; value: string | null | undefined }) {
@@ -164,13 +197,4 @@ function CompactSpecifications({ attributes }: { attributes: EquipmentAttribute[
       <dd className="break-words p-1.5 text-[10px]">{attribute.value || '-'}</dd>
     </div>)}
   </dl>
-}
-
-function getStatusLabel(status: Equipment['status']): string {
-  return {
-    ACTIVE: '사용 중',
-    INSPECTION_REQUIRED: '점검 필요',
-    OUT_OF_SERVICE: '사용 중지',
-    DISPOSED: '폐기',
-  }[status]
 }

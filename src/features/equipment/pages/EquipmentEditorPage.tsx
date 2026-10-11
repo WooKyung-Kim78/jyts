@@ -17,6 +17,8 @@ import {
   createEquipment,
   EQUIPMENT_CATEGORIES,
   EQUIPMENT_CATEGORY_LABELS,
+  EQUIPMENT_INSPECTION_CYCLES,
+  EQUIPMENT_INSPECTION_CYCLE_LABELS,
   getActiveEmployees,
   getEquipmentById,
   getEquipmentMasterFields,
@@ -27,6 +29,7 @@ import {
   type EquipmentCategory,
   type EquipmentMasterField,
   type EquipmentInput,
+  type InspectionCycle,
 } from '../api/equipment'
 
 type EditorMode = 'create' | 'edit' | 'copy'
@@ -36,6 +39,7 @@ const formSchema = z.object({
   equipment_code: z.string().trim().min(1, '장비 코드를 입력하세요.').max(60),
   name: z.string().trim().min(1, '장비명을 입력하세요.').max(150),
   category: z.enum(EQUIPMENT_CATEGORIES),
+  inspection_cycle: z.string(),
   specifics: z.string().max(20000).nullable(),
   assigned_user_id: z.string(),
   master_values: z.record(z.string(), z.string().nullable()),
@@ -47,6 +51,20 @@ const formSchema = z.object({
   })).max(30),
 })
 type FormValues = z.infer<typeof formSchema>
+
+// Copies keep the source cycle on the server, so only create/edit require a choice.
+const cycleRequiredSchema = formSchema.extend({
+  inspection_cycle: z.string().refine(isInspectionCycle, '정기점검 주기를 선택하세요.'),
+})
+
+function isInspectionCycle(value: string): value is InspectionCycle {
+  return EQUIPMENT_INSPECTION_CYCLES.some((cycle) => cycle === value)
+}
+
+function toInspectionCycle(value: string): InspectionCycle {
+  if (!isInspectionCycle(value)) throw new Error('Invalid inspection cycle')
+  return value
+}
 
 const equipmentQueryKey = ['equipment'] as const
 
@@ -71,12 +89,13 @@ export function EquipmentEditorPage({ mode }: { mode: EditorMode }) {
   })
   const [selectedCategory, setSelectedCategory] = useState<EquipmentCategory>('PRECISION_AIR_CONDITIONER')
   const { register, control, reset, setValue, handleSubmit, formState: { errors } } = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(mode === 'copy' ? formSchema : cycleRequiredSchema),
     defaultValues: {
       organization_id: '',
       equipment_code: '',
       name: '',
       category: 'PRECISION_AIR_CONDITIONER',
+      inspection_cycle: '',
       specifics: '',
       assigned_user_id: '',
       master_values: {},
@@ -102,6 +121,7 @@ export function EquipmentEditorPage({ mode }: { mode: EditorMode }) {
       equipment_code: mode === 'copy' ? '' : source.equipment_code,
       name: source.name,
       category: source.category,
+      inspection_cycle: source.inspection_cycle ?? '',
       specifics: source.specifics ?? '',
       assigned_user_id: mode === 'copy' ? '' : source.assigned_user_id ?? '',
       master_values: {},
@@ -114,10 +134,10 @@ export function EquipmentEditorPage({ mode }: { mode: EditorMode }) {
 
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => saveEquipment(mode, equipmentId, values, photos, sourceQuery.data),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       await queryClient.invalidateQueries({ queryKey: equipmentQueryKey })
       setNotice(mode === 'create' ? '장비를 등록했습니다.' : mode === 'edit' ? '장비 정보를 수정했습니다.' : '고객사에 장비 사본을 등록했습니다.')
-      navigate('/equipment')
+      navigate(`/equipment/${saved.id}`)
     },
     onError: (error) => setNotice(getErrorMessage(error)),
   })
@@ -133,11 +153,12 @@ export function EquipmentEditorPage({ mode }: { mode: EditorMode }) {
   const fields = mode === 'create' ? masterFields.data ?? [] : snapshotFields
   const title = mode === 'create' ? '장비 등록' : mode === 'edit' ? '장비 수정' : '고객사에 복제'
   const options = organizations.data?.filter((organization) => mode !== 'copy' || organization.id !== source?.organization_id) ?? []
+  const returnPath = mode === 'create' || !equipmentId ? '/equipment' : `/equipment/${equipmentId}`
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-5">
       <header className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon" aria-label="장비 목록으로 돌아가기"><Link to="/equipment"><ArrowLeft aria-hidden="true" /></Link></Button>
+        <Button asChild variant="ghost" size="icon" aria-label={mode === 'create' ? '장비 목록으로 돌아가기' : '장비 상세로 돌아가기'}><Link to={returnPath}><ArrowLeft aria-hidden="true" /></Link></Button>
         <div>
           <h1 className="text-2xl font-bold">{title}</h1>
           {source && <p className="mt-1 text-sm text-muted-foreground">원본: {source.organization_name} · {source.name}</p>}
@@ -183,16 +204,26 @@ export function EquipmentEditorPage({ mode }: { mode: EditorMode }) {
               </div>
             </div>
 
-            {mode !== 'copy' && <div className="flex flex-col gap-2 sm:max-w-md">
-              <Label htmlFor="equipment-assignee">담당 직원</Label>
-              <select id="equipment-assignee" className="h-10 rounded-md border border-input bg-background px-3 text-sm" {...register('assigned_user_id')}>
-                <option value="">담당자 미지정</option>
-                {source?.assigned_user && !source.assigned_user.active && (
-                  <option value={source.assigned_user.id}>{source.assigned_user.name} (퇴사)</option>
-                )}
-                {(employees.data ?? []).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
-              </select>
-              {employees.isError && <p role="alert" className="text-sm text-destructive">직원 목록을 불러오지 못했습니다.</p>}
+            {mode !== 'copy' && <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="equipment-inspection-cycle">정기점검 주기</Label>
+                <select id="equipment-inspection-cycle" aria-invalid={Boolean(errors.inspection_cycle)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" {...register('inspection_cycle')}>
+                  <option value="">주기 선택</option>
+                  {EQUIPMENT_INSPECTION_CYCLES.map((cycle) => <option key={cycle} value={cycle}>{EQUIPMENT_INSPECTION_CYCLE_LABELS[cycle]}</option>)}
+                </select>
+                {errors.inspection_cycle && <p className="text-sm text-destructive">정기점검 주기를 선택하세요.</p>}
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="equipment-assignee">담당 직원</Label>
+                <select id="equipment-assignee" className="h-10 rounded-md border border-input bg-background px-3 text-sm" {...register('assigned_user_id')}>
+                  <option value="">담당자 미지정</option>
+                  {source?.assigned_user && !source.assigned_user.active && (
+                    <option value={source.assigned_user.id}>{source.assigned_user.name} (퇴사)</option>
+                  )}
+                  {(employees.data ?? []).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+                </select>
+                {employees.isError && <p role="alert" className="text-sm text-destructive">직원 목록을 불러오지 못했습니다.</p>}
+              </div>
             </div>}
 
             {mode === 'create' && masterFields.isPending && <p role="status">카테고리 항목을 불러오는 중입니다.</p>}
@@ -217,7 +248,7 @@ export function EquipmentEditorPage({ mode }: { mode: EditorMode }) {
             </div>}
 
             <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
-              <Button asChild type="button" variant="outline"><Link to="/equipment">취소</Link></Button>
+              <Button asChild type="button" variant="outline"><Link to={returnPath}>취소</Link></Button>
               <Button type="submit" disabled={saveMutation.isPending || (mode === 'create' && masterFields.isPending)}>
                 <Plus aria-hidden="true" />{saveMutation.isPending ? '저장 중' : title}
               </Button>
@@ -251,6 +282,7 @@ async function saveEquipment(
       equipment_code: values.equipment_code,
       name: values.name,
       category: values.category,
+      inspection_cycle: toInspectionCycle(values.inspection_cycle),
       specifics: values.specifics?.trim() || null,
       assigned_user_id: values.assigned_user_id || null,
       master_values: values.master_values,
@@ -270,6 +302,7 @@ async function saveEquipment(
     organization_id: values.organization_id,
     equipment_code: values.equipment_code,
     name: values.name,
+    inspection_cycle: toInspectionCycle(values.inspection_cycle),
     specifics: values.specifics?.trim() || null,
     assigned_user_id: values.assigned_user_id || null,
     attribute_values: snapshotValues,

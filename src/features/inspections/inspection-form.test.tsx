@@ -128,7 +128,7 @@ describe('inspection input page', () => {
     expect(screen.getByText('저장됨')).toBeInTheDocument()
     expect(screen.getByText('1/2 완료')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '수정' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '다음' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '다음' })).toHaveLength(1)
   })
 
   it('rejects non-numeric values in number fields before saving', async () => {
@@ -142,7 +142,7 @@ describe('inspection input page', () => {
     expect(api.saveInspectionItem).not.toHaveBeenCalled()
   })
 
-  it('completes the inspection after every result is saved', async () => {
+  it('saves the last item with the next button, then saves remarks, completes and opens the report', async () => {
     const user = userEvent.setup()
     api.getInspection.mockResolvedValue(inspection({
       items: [item({ input_values: ['1', '2', '정상'], result: 'GOOD', saved_at: '2026-10-10T01:00:00.000Z' }), secondItem],
@@ -153,21 +153,32 @@ describe('inspection input page', () => {
       ...input,
       saved_at: '2026-10-10T01:05:00.000Z',
     }))
-    api.completeInspection.mockResolvedValue(inspection({ status: 'COMPLETED' }))
-    renderRoute(`/inspections/${inspectionId}`, { auth: activeAuth('USER') })
+    api.updateInspection.mockResolvedValue(inspection({ remarks: '필터 교체 예정' }))
+    api.completeInspection.mockResolvedValue(inspection({ status: 'COMPLETED', remarks: '필터 교체 예정' }))
+    const { router } = renderRoute(`/inspections/${inspectionId}`, { auth: activeAuth('USER') })
 
-    const complete = await screen.findByRole('button', { name: '점검 완료' })
-    expect(complete).toBeDisabled()
-    await user.click(within(screen.getByRole('group', { name: '2번 결과' })).getByRole('button', { name: '불량' }))
+    await user.click(within(await screen.findByRole('group', { name: '2번 결과' })).getByRole('button', { name: '불량' }))
     await user.type(screen.getByLabelText('메모'), '필터 오염')
-    await user.click(screen.getByRole('button', { name: '저장' }))
+    await user.click(screen.getByRole('button', { name: '다음' }))
 
     expect(api.saveInspectionItem).toHaveBeenCalledWith(inspectionId, secondItem.id, { input_values: [], result: 'BAD', remarks: '필터 오염' })
-    await waitFor(() => expect(screen.getByRole('button', { name: '점검 완료' })).toBeEnabled())
-    await user.click(screen.getByRole('button', { name: '점검 완료' }))
+    await waitFor(() => expect(screen.getByLabelText('기타사항')).toHaveFocus())
+    await user.type(screen.getByLabelText('기타사항'), '필터 교체 예정')
+    await user.click(screen.getByRole('button', { name: '저장&점검완료' }))
 
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/inspections/${inspectionId}/report`))
+    expect(api.updateInspection).toHaveBeenCalledWith(inspectionId, { remarks: '필터 교체 예정' })
     expect(api.completeInspection).toHaveBeenCalledWith(inspectionId)
-    expect(await screen.findByText(/점검을 완료했습니다/)).toBeInTheDocument()
+  })
+
+  it('does not complete while an item result is missing', async () => {
+    const user = userEvent.setup()
+    renderRoute(`/inspections/${inspectionId}`, { auth: activeAuth('USER') })
+
+    await user.click(await screen.findByRole('button', { name: '저장&점검완료' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('결과를 선택하지 않은 항목이 있습니다.')
+    expect(api.completeInspection).not.toHaveBeenCalled()
   })
 
   it('uploads a photo for an item', async () => {
@@ -206,14 +217,14 @@ describe('inspection input page', () => {
     api.updateInspection.mockResolvedValue(inspection({ remarks: '다음 점검 시 필터 교체' }))
     renderRoute(`/inspections/${inspectionId}`, { auth: activeAuth('USER') })
 
-    const save = await screen.findByRole('button', { name: '기타사항 저장' })
+    const save = await screen.findByRole('button', { name: '저장' })
     expect(save).toBeDisabled()
     await user.type(screen.getByLabelText('기타사항'), '다음 점검 시 필터 교체')
     await user.click(save)
 
     await waitFor(() => expect(api.updateInspection).toHaveBeenCalledWith(inspectionId, { remarks: '다음 점검 시 필터 교체' }))
     expect(await screen.findByText('기타사항을 저장했습니다.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '기타사항 저장' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
   })
 
   it('is read-only after the report e-mail is sent', async () => {
