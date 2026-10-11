@@ -47,6 +47,7 @@ describe('change password page', () => {
       password_confirmation: 'new-pass1',
     })
     expect(await screen.findByText(/비밀번호를 변경했습니다/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '테스트 사용자' }))
     expect(screen.getByRole('link', { name: '비밀번호 변경' })).toHaveAttribute('href', '/account/password')
   })
 })

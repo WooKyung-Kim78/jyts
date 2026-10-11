@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Equipment;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -20,6 +21,7 @@ class StoreEquipmentRequest extends FormRequest
             'equipment_code' => ['required', 'string', 'max:60', Rule::unique('equipment', 'equipment_code')->whereNull('deleted_at')],
             'name' => ['required', 'string', 'max:150'],
             'category' => ['required', Rule::in(['PRECISION_AIR_CONDITIONER', 'UPS', 'FIRE_SUPPRESSION', 'VOICE_ALARM'])],
+            'inspection_cycle' => ['required', Rule::in(Equipment::INSPECTION_CYCLES)],
             'assigned_user_id' => ['sometimes', 'nullable', 'integer', Rule::exists('users', 'id')->where('active', true)],
             'specifics' => ['nullable', 'string', 'max:20000'],
             'master_values' => ['sometimes', 'array', 'max:100'],

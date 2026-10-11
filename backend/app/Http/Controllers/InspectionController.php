@@ -29,8 +29,11 @@ class InspectionController extends Controller
 
         $page = Inspection::query()
             ->with(self::RELATIONS)
+            ->withExists(['items as has_bad_result' => fn ($query) => $query->where('result', 'BAD')])
             ->when($request->validated('equipment_id'), fn ($query, $id) => $query->where('equipment_id', $id))
             ->when($request->validated('status'), fn ($query, $status) => $query->where('status', $status))
+            ->when($request->validated('inspected_from'), fn ($query, $date) => $query->whereDate('inspected_on', '>=', $date))
+            ->when($request->validated('inspected_to'), fn ($query, $date) => $query->whereDate('inspected_on', '<=', $date))
             ->orderByDesc('inspected_on')
             ->orderByDesc('created_at')
             ->paginate(self::PER_PAGE);

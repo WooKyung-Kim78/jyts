@@ -2,7 +2,7 @@ import type { RouteObject } from 'react-router'
 
 import { LoadingState } from '@/components/feedback/LoadingState'
 import { AppLayout } from '@/components/layout/AppLayout'
-import { upcomingNavigationItems } from '@/components/layout/navigation'
+import { comingSoonRoutes } from '@/components/layout/navigation'
 import { ComingSoonPage } from '@/components/pages/ComingSoonPage'
 import { NotFoundPage } from '@/components/pages/NotFoundPage'
 import { RouteErrorPage } from '@/components/pages/RouteErrorPage'
@@ -65,6 +65,13 @@ export const routes: RouteObject[] = [
                 lazy: async () => {
                   const { EquipmentEditorPage } = await import('@/features/equipment/pages/EquipmentEditorPage')
                   return { Component: () => <EquipmentEditorPage mode="create" /> }
+                },
+              },
+              {
+                path: '/equipment/:equipmentId',
+                lazy: async () => {
+                  const { EquipmentDetailPage } = await import('@/features/equipment/pages/EquipmentDetailPage')
+                  return { Component: EquipmentDetailPage }
                 },
               },
               {
@@ -156,7 +163,7 @@ export const routes: RouteObject[] = [
                   }
                 },
               },
-              ...upcomingNavigationItems.filter(({ to }) => to !== '/organizations').map(({ to, label, roles }) => ({
+              ...comingSoonRoutes.map(({ to, label, roles }) => ({
                 path: to,
                 element: roles ? (
                   <RequireRole roles={roles}>

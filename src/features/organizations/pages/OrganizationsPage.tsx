@@ -1,16 +1,23 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router'
+import { useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
-import { Building2, ChevronLeft, ChevronRight, ClipboardList, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Building2, ClipboardList, FileText, MousePointerClick, Pencil, Plus, Server, Trash2 } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { z } from 'zod'
 
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { DescriptionList } from '@/components/ui/description-list'
 import { Input, Label } from '@/components/ui/input'
+import { Pagination } from '@/components/ui/pagination'
+import { Panel } from '@/components/ui/panel'
+import { SearchInput } from '@/components/ui/search-input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ApiError } from '@/lib/api/client'
+import { cn } from '@/lib/utils'
 import { useAuth } from '@/features/auth/hooks/useAuth'
 import {
   deleteOrganization,
@@ -21,7 +28,8 @@ import {
   uploadOrganizationMap,
   type Organization,
 } from '../api/organizations'
-import { getEquipment } from '@/features/equipment/api/equipment'
+import { EQUIPMENT_CATEGORY_LABELS, getEquipment, type Equipment } from '@/features/equipment/api/equipment'
+import { EquipmentStatusBadge } from '@/features/equipment/components/EquipmentStatusBadge'
 
 const queryKey = ['organizations'] as const
 const pageSize = 12
@@ -30,14 +38,24 @@ type FormValues = z.infer<typeof organizationInputSchema>
 export function OrganizationsPage() {
   const auth = useAuth()
   const canManage = auth.status === 'active' && auth.profile.role === 'ADMIN'
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedId = searchParams.get('selected') ?? ''
   const [editing, setEditing] = useState<Organization | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const detailRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const organizations = useQuery({ queryKey, queryFn: getOrganizations })
-  const equipment = useQuery({ queryKey: ['equipment'], queryFn: () => getEquipment() })
+  const equipment = useQuery({ queryKey: ['equipment', ''], queryFn: () => getEquipment() })
+
+  function select(id: string | null) {
+    const next = new URLSearchParams(searchParams)
+    if (id) next.set('selected', id)
+    else next.delete('selected')
+    setSearchParams(next, { replace: true })
+  }
 
   const saveMutation = useMutation({
     mutationFn: async ({ values, image, id }: { values: FormValues; image: File | null; id?: string }) => {
@@ -50,10 +68,11 @@ export function OrganizationsPage() {
       if (image) await uploadOrganizationMap(organization.id, image)
       return organization
     },
-    onSuccess: async (_organization, variables) => {
+    onSuccess: async (organization, variables) => {
       setModalOpen(false)
       setEditing(null)
       setNotice(variables.image ? '고객사 정보와 지도 이미지를 저장했습니다.' : '고객사 정보를 저장했습니다.')
+      select(organization.id)
       await queryClient.invalidateQueries({ queryKey })
     },
     onError: (error) => setNotice(getMutationMessage(error)),
@@ -61,7 +80,10 @@ export function OrganizationsPage() {
   const deleteMutation = useMutation({
     mutationFn: deleteOrganization,
     onSuccess: async () => {
+      setModalOpen(false)
+      setEditing(null)
       setNotice('고객사를 삭제했습니다.')
+      select(null)
       await queryClient.invalidateQueries({ queryKey })
     },
     onError: (error) => setNotice(getMutationMessage(error)),
@@ -76,6 +98,13 @@ export function OrganizationsPage() {
     onError: (error) => setNotice(getMutationMessage(error)),
   })
 
+  const equipmentByOrganization = useMemo(() => {
+    const grouped = new Map<string, Equipment[]>()
+    for (const item of equipment.data ?? []) {
+      grouped.set(item.organization_id, [...(grouped.get(item.organization_id) ?? []), item])
+    }
+    return grouped
+  }, [equipment.data])
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase()
     return (organizations.data ?? []).filter((organization) => !query || [
@@ -87,6 +116,7 @@ export function OrganizationsPage() {
   }, [organizations.data, search])
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const visibleOrganizations = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const selected = organizations.data?.find((organization) => organization.id === selectedId) ?? null
 
   function startCreate() {
     setEditing(null)
@@ -109,83 +139,94 @@ export function OrganizationsPage() {
 
   return (
     <section className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">고객사</h1>
-          <p className="mt-1 text-sm text-muted-foreground">고객사와 설치 장비 정보를 관리합니다.</p>
-        </div>
-        {canManage && <Button type="button" onClick={startCreate}><Plus aria-hidden="true" />고객사 등록</Button>}
-      </header>
+      <PageHeader
+        title="고객사"
+        description="고객사를 선택하면 보유 장비와 상태를 바로 확인할 수 있습니다."
+        actions={canManage && <Button type="button" onClick={startCreate}><Plus aria-hidden="true" />고객사 등록</Button>}
+      />
 
-      <div className="flex flex-col gap-2 sm:max-w-md">
-        <Label htmlFor="organization-search">고객사 검색</Label>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input id="organization-search" value={search} onChange={(event) => { setSearch(event.currentTarget.value); setPage(1) }} className="pl-9" placeholder="고객사, 담당자, 연락처, 주소" />
-        </div>
-      </div>
-
-      {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
-      {organizations.isPending && <p role="status">고객사 목록을 불러오는 중입니다.</p>}
+      {notice && <p role="status" className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">{notice}</p>}
+      {organizations.isPending && <p role="status" className="text-sm text-muted-foreground">고객사 목록을 불러오는 중입니다.</p>}
       {organizations.isError && <p role="alert" className="text-sm text-destructive">고객사 목록을 불러오지 못했습니다.</p>}
       {equipment.isError && <p role="alert" className="text-sm text-destructive">연결 장비 목록을 불러오지 못했습니다.</p>}
 
-      {organizations.data?.length === 0 && (
-        <Card><CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-          <Building2 className="size-8 text-muted-foreground" aria-hidden="true" />
-          <p className="text-sm text-muted-foreground">등록된 고객사가 없습니다.</p>
-        </CardContent></Card>
-      )}
-      {organizations.data && organizations.data.length > 0 && filtered.length === 0 && (
-        <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">검색 결과가 없습니다.</CardContent></Card>
-      )}
-
-      {visibleOrganizations.length > 0 && (
-        <>
-          <ul aria-label="고객사 목록" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {visibleOrganizations.map((organization) => {
-              const linkedEquipment = (equipment.data ?? []).filter((item) => item.organization_id === organization.id)
-              return <li key={organization.id}>
-                <Card className="flex h-full min-h-56 flex-col overflow-hidden rounded-md">
-                  <div className="flex min-h-12 items-center justify-between gap-2 border-b px-4 py-2">
-                    <h2 className="min-w-0 truncate text-sm font-semibold" title={organization.name}>{organization.name}</h2>
-                    <div className="flex shrink-0 items-center">
-                      <Button asChild variant="ghost" size="icon" title="고객사 장비이력카드" aria-label={`${organization.name} 장비이력카드`}>
-                        <Link to={`/organizations/${organization.id}/equipment-history-card`}><ClipboardList aria-hidden="true" /></Link>
-                      </Button>
-                      {canManage && <Button type="button" variant="ghost" size="icon" title="고객사 수정" aria-label={`${organization.name} 수정`} onClick={() => startEdit(organization)}>
-                        <Pencil aria-hidden="true" />
-                      </Button>}
-                    </div>
-                  </div>
-                  <CardContent className="flex flex-1 flex-col gap-2 p-4 text-sm">
-                    <p className="truncate"><span className="text-muted-foreground">담당자 </span>{organization.contact_name || '-'}</p>
-                    <p className="truncate"><span className="text-muted-foreground">연락처 </span>{organization.contact_phone || '-'}</p>
-                    <p className="line-clamp-2 min-h-10 break-words"><span className="text-muted-foreground">주소 </span>{organization.address || '-'}</p>
-                    <div className="mt-auto border-t pt-2">
-                      <p className="mb-1 text-xs font-medium text-muted-foreground">연결 장비 ({linkedEquipment.length})</p>
-                      {linkedEquipment.length ? <ul className="max-h-20 space-y-1 overflow-y-auto">
-                        {linkedEquipment.map((item) => <li key={item.id}>
-                          <Link to={`/equipment/${item.id}/edit`} className="block truncate text-xs underline underline-offset-2">
-                            {item.name} · {item.equipment_code}
-                          </Link>
-                        </li>)}
-                      </ul> : <p className="text-xs text-muted-foreground">연결된 장비 없음</p>}
-                    </div>
-                  </CardContent>
-                </Card>
-              </li>
-            })}
-          </ul>
-
-          <footer className="flex items-center justify-between gap-3 border-t pt-3">
-            <p className="text-sm text-muted-foreground">{filtered.length}개 고객사 · {page} / {totalPages} 페이지</p>
-            <div className="flex gap-1">
-              <Button type="button" variant="outline" size="icon" aria-label="이전 페이지" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}><ChevronLeft aria-hidden="true" /></Button>
-              <Button type="button" variant="outline" size="icon" aria-label="다음 페이지" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}><ChevronRight aria-hidden="true" /></Button>
+      {organizations.data && (
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <Panel title="고객사 목록" description={`${organizations.data.length.toLocaleString('ko-KR')}개 고객사`} bodyClassName="flex flex-col gap-3 p-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="organization-search">고객사 검색</Label>
+              <SearchInput id="organization-search" value={search} onChange={(event) => { setSearch(event.currentTarget.value); setPage(1) }} placeholder="고객사, 담당자, 연락처, 주소" />
             </div>
-          </footer>
-        </>
+
+            {organizations.data.length === 0 && <EmptyState icon={Building2} title="등록된 고객사가 없습니다." className="py-6" />}
+            {organizations.data.length > 0 && filtered.length === 0 && <EmptyState title="검색 결과가 없습니다." className="py-6" />}
+
+            {visibleOrganizations.length > 0 && (
+              <>
+                <Table aria-label="고객사 목록">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>고객사명</TableHead>
+                      <TableHead>담당자</TableHead>
+                      <TableHead>연락처</TableHead>
+                      <TableHead className="text-right">장비</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleOrganizations.map((organization) => {
+                      const isSelected = organization.id === selectedId
+                      return (
+                        <TableRow key={organization.id} data-state={isSelected ? 'selected' : undefined} className="cursor-pointer" onClick={() => select(organization.id)}>
+                          <TableCell className="max-w-56">
+                            <Link
+                              to={`?selected=${encodeURIComponent(organization.id)}`}
+                              replace
+                              aria-current={isSelected ? 'true' : undefined}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                if (window.innerWidth < 1024) detailRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+                              }}
+                              className={cn('block truncate font-medium underline-offset-4 hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none', isSelected && 'text-primary')}
+                            >
+                              {organization.name}
+                            </Link>
+                            <span className="block truncate text-xs text-muted-foreground">{organization.address || '-'}</span>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">{organization.contact_name || '-'}</TableCell>
+                          <TableCell className="whitespace-nowrap">{organization.contact_phone || '-'}</TableCell>
+                          <TableCell className="text-right tabular-nums">{equipmentByOrganization.get(organization.id)?.length ?? 0}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+                <Pagination
+                  label="고객사 목록 페이지"
+                  summary={`${filtered.length}개 고객사 · ${page}/${totalPages} 페이지`}
+                  page={page}
+                  lastPage={totalPages}
+                  onChange={setPage}
+                />
+              </>
+            )}
+          </Panel>
+
+          <div ref={detailRef} className="scroll-mt-20 lg:sticky lg:top-20">
+            {selected ? (
+              <OrganizationDetail
+                organization={selected}
+                equipment={equipmentByOrganization.get(selected.id) ?? []}
+                equipmentLoading={equipment.isPending}
+                canManage={canManage}
+                onEdit={() => startEdit(selected)}
+              />
+            ) : (
+              <div className="rounded-lg border border-dashed bg-background">
+                <EmptyState icon={MousePointerClick} title="고객사를 선택하세요." description="목록에서 고객사를 선택하면 연락처와 보유 장비가 여기에 표시됩니다." />
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {canManage && <OrganizationDialog
@@ -200,6 +241,87 @@ export function OrganizationsPage() {
         onDelete={() => editing && remove(editing)}
       />}
     </section>
+  )
+}
+
+function OrganizationDetail({ organization, equipment, equipmentLoading, canManage, onEdit }: {
+  organization: Organization
+  equipment: Equipment[]
+  equipmentLoading: boolean
+  canManage: boolean
+  onEdit: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <Panel
+        title={organization.name}
+        description="고객사 정보"
+        actions={<>
+          <Button asChild variant="ghost" size="icon" title="고객사 장비이력카드 일괄 인쇄" aria-label={`${organization.name} 장비이력카드`}>
+            <Link to={`/organizations/${organization.id}/equipment-history-card`}><ClipboardList aria-hidden="true" /></Link>
+          </Button>
+          {canManage && <Button type="button" variant="ghost" size="icon" title="고객사 수정" aria-label={`${organization.name} 수정`} onClick={onEdit}>
+            <Pencil aria-hidden="true" />
+          </Button>}
+        </>}
+      >
+        <div className="grid sm:grid-cols-[minmax(0,1fr)_auto]">
+          <DescriptionList
+            columns={1}
+            items={[
+              { label: '담당자', value: organization.contact_name },
+              { label: '연락처', value: organization.contact_phone },
+              { label: '주소', value: organization.address },
+            ]}
+          />
+          {organization.map_image_url && (
+            <a href={organization.map_image_url} target="_blank" rel="noreferrer" className="block border-t p-2 sm:border-t-0 sm:border-l">
+              <img src={organization.map_image_url} alt={`${organization.name} 지도 캡처`} className="h-28 w-full max-w-48 rounded object-contain" />
+            </a>
+          )}
+        </div>
+      </Panel>
+
+      <Panel
+        title="보유 장비"
+        description={`${equipment.length}대`}
+        actions={equipment.length > 0 && <Button asChild variant="ghost" size="sm"><Link to={`/equipment?organization_id=${encodeURIComponent(organization.id)}`}>장비 목록에서 보기</Link></Button>}
+      >
+        {equipmentLoading ? <p role="status" className="p-4 text-sm text-muted-foreground">장비 목록을 불러오는 중입니다.</p> : equipment.length === 0 ? (
+          <EmptyState icon={Server} title="연결된 장비가 없습니다." className="py-6" />
+        ) : (
+          <Table aria-label={`${organization.name} 보유 장비`} containerClassName="rounded-none border-0">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-24">상태</TableHead>
+                <TableHead>장비명 / 코드</TableHead>
+                <TableHead>종류</TableHead>
+                <TableHead>담당 직원</TableHead>
+                <TableHead className="text-right"><span className="sr-only">이력카드</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {equipment.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell><EquipmentStatusBadge status={item.status} /></TableCell>
+                  <TableCell>
+                    <Link to={`/equipment/${item.id}`} className="font-medium underline-offset-4 hover:text-primary hover:underline">{item.name}</Link>
+                    <span className="block font-mono text-xs text-muted-foreground">{item.equipment_code}</span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">{EQUIPMENT_CATEGORY_LABELS[item.category]}</TableCell>
+                  <TableCell className="whitespace-nowrap">{item.assigned_user?.name || '-'}</TableCell>
+                  <TableCell className="py-1 text-right">
+                    <Button asChild variant="ghost" size="icon" title="장비이력카드" aria-label={`${item.name} 이력카드`}>
+                      <Link to={`/equipment/${item.id}/history-card`}><FileText aria-hidden="true" /></Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Panel>
+    </div>
   )
 }
 

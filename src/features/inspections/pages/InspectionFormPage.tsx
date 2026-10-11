@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Link, useBlocker, useParams } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useBlocker, useNavigate, useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, ChevronDown, FileText, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, ChevronDown, FileText, Save, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/input'
@@ -60,11 +60,16 @@ function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
 }
 
 function focusItem(itemId: string | undefined) {
-  const card = itemId ? document.getElementById(itemElementId(itemId)) : document.getElementById('inspection-complete')
+  if (!itemId) {
+    const remarks = document.getElementById('inspection-remarks')
+    remarks?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    remarks?.focus({ preventScroll: true })
+    return
+  }
+  const card = document.getElementById(itemElementId(itemId))
   if (!card) return
   card.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
-  const target = card.matches('button') ? card : card.querySelector<HTMLElement>('[data-inspection-field], [data-result-button]')
-  target?.focus({ preventScroll: true })
+  card.querySelector<HTMLElement>('[data-inspection-field], [data-result-button]')?.focus({ preventScroll: true })
 }
 
 export function InspectionFormPage() {
@@ -72,19 +77,23 @@ export function InspectionFormPage() {
   const auth = useAuth()
   const currentUserId = auth.status === 'active' ? auth.profile.id : null
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const queryKey = ['inspections', inspectionId] as const
   const inspection = useQuery({ queryKey, queryFn: () => getInspection(inspectionId) })
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({})
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({})
   const [notice, setNotice] = useState<string | null>(null)
   const [remarksDraft, setRemarksDraft] = useState<string | null>(null)
+  const [finishError, setFinishError] = useState<string | null>(null)
+  // Lets the post-completion redirect pass before the cleared drafts re-render.
+  const leavingRef = useRef(false)
 
   const items = inspection.data?.items ?? []
   const canEdit = inspection.data?.can_edit ?? false
   const remarksDirty = remarksDraft !== null && remarksDraft.trim() !== (inspection.data?.remarks ?? '')
   const dirtyCount = items.filter((item) => isDirty(drafts[item.id], item)).length + (remarksDirty ? 1 : 0)
   const doneCount = items.filter((item) => item.result !== null).length
-  const blocker = useBlocker(dirtyCount > 0)
+  const blocker = useBlocker(() => !leavingRef.current && dirtyCount > 0)
 
   useEffect(() => {
     if (dirtyCount === 0) return
@@ -134,15 +143,22 @@ export function InspectionFormPage() {
     onError: () => setNotice('점검일자를 변경하지 못했습니다. 다시 시도하세요.'),
   })
 
-  const completeMutation = useMutation({
-    mutationFn: () => completeInspection(inspectionId),
-    onSuccess: (completed) => {
-      queryClient.setQueryData(queryKey, completed)
-      setNotice('점검을 완료했습니다. 담당자에게 이메일을 보내기 전까지 수정할 수 있습니다.')
+  const finishMutation = useMutation({
+    mutationFn: async ({ remarks, complete }: { remarks: string | null; complete: boolean }) => {
+      if (remarks !== null) await updateInspection(inspectionId, { remarks: remarks.trim() || null })
+      return complete ? completeInspection(inspectionId) : null
     },
-    onError: (error) => setNotice(error instanceof ApiError && error.status === 422
+    onSuccess: async (completed) => {
+      if (completed) queryClient.setQueryData(queryKey, completed)
+      else await queryClient.invalidateQueries({ queryKey })
+      void queryClient.invalidateQueries({ queryKey: ['inspections', 'list'] })
+      setRemarksDraft(null)
+      leavingRef.current = true
+      navigate(`/inspections/${inspectionId}/report`)
+    },
+    onError: (error) => setFinishError(error instanceof ApiError && error.status === 422
       ? '결과를 선택하지 않은 항목이 있습니다.'
-      : '점검을 완료하지 못했습니다. 다시 시도하세요.'),
+      : '저장하거나 점검을 완료하지 못했습니다. 다시 시도하세요.'),
   })
 
   if (inspection.isPending) return <p role="status">점검 내용을 불러오는 중입니다.</p>
@@ -181,6 +197,23 @@ export function InspectionFormPage() {
       return
     }
     saveMutation.mutate({ item, draft, nextId })
+  }
+
+  function finish() {
+    setFinishError(null)
+    const unsaved = items.find((item) => isDirty(drafts[item.id], item))
+    if (unsaved) {
+      setFinishError('저장하지 않은 점검항목이 있습니다. 항목의 다음 버튼으로 먼저 저장하세요.')
+      focusItem(unsaved.id)
+      return
+    }
+    const missing = items.find((item) => item.result === null)
+    if (data.status === 'DRAFT' && missing) {
+      setFinishError('결과를 선택하지 않은 항목이 있습니다.')
+      focusItem(missing.id)
+      return
+    }
+    finishMutation.mutate({ remarks: remarksDirty ? remarksDraft : null, complete: data.status === 'DRAFT' })
   }
 
   return (
@@ -257,7 +290,6 @@ export function InspectionFormPage() {
             error={itemErrors[item.id] ?? null}
             canEdit={canEdit}
             saving={saveMutation.isPending && saveMutation.variables?.item.id === item.id}
-            isLast={index === items.length - 1}
             onChange={(draft) => setDrafts((current) => ({ ...current, [item.id]: draft }))}
             onNext={() => next(item, index)}
             onPhotosChange={(photos) => updateCachedItem({ ...item, photos })}
@@ -278,14 +310,28 @@ export function InspectionFormPage() {
           onChange={(event) => setRemarksDraft(event.currentTarget.value)}
         />
         {canEdit && (
-          <Button
-            type="button"
-            className="min-h-12 self-end text-base"
-            disabled={!remarksDirty || remarksMutation.isPending}
-            onClick={() => remarksMutation.mutate(remarksDraft ?? '')}
-          >
-            {remarksMutation.isPending ? '저장 중…' : '기타사항 저장'}
-          </Button>
+          <div className="flex flex-col gap-2">
+            {finishError && <p role="alert" className="text-sm text-destructive">{finishError}</p>}
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-12 text-base"
+                disabled={!remarksDirty || remarksMutation.isPending || finishMutation.isPending}
+                onClick={() => remarksMutation.mutate(remarksDraft ?? '')}
+              >
+                <Save aria-hidden="true" />{remarksMutation.isPending ? '저장 중…' : '저장'}
+              </Button>
+              <Button
+                type="button"
+                className="min-h-12 text-base"
+                disabled={remarksMutation.isPending || finishMutation.isPending}
+                onClick={finish}
+              >
+                <CheckCircle2 aria-hidden="true" />{finishMutation.isPending ? '처리 중…' : '저장&점검완료'}
+              </Button>
+            </div>
+          </div>
         )}
       </section>
 
@@ -300,23 +346,13 @@ export function InspectionFormPage() {
               <ChevronDown aria-hidden="true" />미입력 항목
             </Button>
           )}
-          {canEdit && data.status === 'DRAFT' && (
-            <Button
-              id="inspection-complete"
-              size="sm"
-              disabled={dirtyCount > 0 || doneCount < items.length || completeMutation.isPending}
-              onClick={() => completeMutation.mutate()}
-            >
-              <CheckCircle2 aria-hidden="true" />{completeMutation.isPending ? '완료 처리 중…' : '점검 완료'}
-            </Button>
-          )}
         </div>
       </div>
     </section>
   )
 }
 
-function InspectionItemCard({ inspection, item, number, draft, dirty, error, canEdit, saving, isLast, onChange, onNext, onPhotosChange }: {
+function InspectionItemCard({ inspection, item, number, draft, dirty, error, canEdit, saving, onChange, onNext, onPhotosChange }: {
   inspection: Inspection
   item: InspectionItem
   number: number
@@ -325,7 +361,6 @@ function InspectionItemCard({ inspection, item, number, draft, dirty, error, can
   error: string | null
   canEdit: boolean
   saving: boolean
-  isLast: boolean
   onChange: (draft: ItemDraft) => void
   onNext: () => void
   onPhotosChange: (photos: InspectionItem['photos']) => void
@@ -427,7 +462,7 @@ function InspectionItemCard({ inspection, item, number, draft, dirty, error, can
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {canEdit && (
         <Button type="button" className="min-h-12 text-base" disabled={saving} onClick={onNext}>
-          {saving ? '저장 중…' : item.saved_at ? '수정' : isLast ? '저장' : '다음'}
+          {saving ? '저장 중…' : item.saved_at ? '수정' : '다음'}
         </Button>
       )}
     </li>

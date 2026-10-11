@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Runs on the Cafe24 server.
-# Usage: remote-release.sh <app-dir-under-home> <release-name> <php-bin> [web-root-under-home]
+# Usage: DEPLOY_APP_DIR=jyts DEPLOY_RELEASE=<name> DEPLOY_PHP_BIN=<php> [DEPLOY_WEB_ROOT=www] bash -s < remote-release.sh
+# Cafe24's bash wrapper ignores command-line arguments, so inputs come from the environment.
 set -euo pipefail
 
-APP_ROOT="$HOME/$1"
-RELEASE="$2"
-PHP_BIN="$3"
-WEB_ROOT="$HOME/${4:-www}"
+APP_ROOT="$HOME/$DEPLOY_APP_DIR"
+RELEASE="$DEPLOY_RELEASE"
+PHP_BIN="$DEPLOY_PHP_BIN"
+WEB_ROOT="$HOME/${DEPLOY_WEB_ROOT:-www}"
 KEEP_RELEASES=5
 
 RELEASES="$APP_ROOT/releases"
@@ -38,9 +39,11 @@ cd "$TARGET"
 "$PHP_BIN" artisan route:cache --no-ansi
 
 # Migrations are reviewed and applied manually before publishing; never run them here.
-if "$PHP_BIN" artisan migrate:status --no-ansi | grep -q 'Pending'; then
+# Capture first so a DB connection failure aborts instead of looking like "no pending".
+MIGRATION_STATUS="$("$PHP_BIN" artisan migrate:status --no-ansi)"
+if grep -q 'Pending' <<< "$MIGRATION_STATUS"; then
   echo "ERROR: 운영 DB에 적용되지 않은 migration 이 있습니다. SQL 검토 후 먼저 적용한 뒤 다시 배포하세요." >&2
-  "$PHP_BIN" artisan migrate:status --no-ansi | grep 'Pending' >&2
+  grep 'Pending' <<< "$MIGRATION_STATUS" >&2
   rm -rf "$TARGET"
   exit 1
 fi

@@ -76,6 +76,7 @@ class EquipmentTest extends TestCase
             'equipment_code' => 'JY-UPS-001',
             'name' => 'UPS 1호기',
             'category' => 'UPS',
+            'inspection_cycle' => 'MONTHLY',
             'master_values' => [$field->id => '100'],
             'custom_fields' => [['label' => '설치 위치', 'value' => '전산실'] ],
         ])->assertCreated()
@@ -130,6 +131,7 @@ class EquipmentTest extends TestCase
             'equipment_code' => 'JY-UPS-ASSIGNEE',
             'name' => 'UPS 담당자 지정',
             'category' => 'UPS',
+            'inspection_cycle' => 'MONTHLY',
             'assigned_user_id' => $assignee->id,
         ])->assertCreated()
             ->assertJsonPath('data.assigned_user_id', (string) $assignee->id)
@@ -169,6 +171,7 @@ class EquipmentTest extends TestCase
                 'equipment_code' => 'JY-AC-001',
                 'name' => '항온항습기 1호기',
                 'category' => 'PRECISION_AIR_CONDITIONER',
+                'inspection_cycle' => 'MONTHLY',
                 'master_values' => [$field->id => '100'],
             ])->assertUnprocessable();
     }
@@ -185,6 +188,7 @@ class EquipmentTest extends TestCase
             'equipment_code' => 'JY-UPS-INITIAL-PHOTO',
             'name' => 'UPS 사진 포함 등록',
             'category' => 'UPS',
+            'inspection_cycle' => 'MONTHLY',
             'photos' => [
                 UploadedFile::fake()->createWithContent('front.png', $png),
                 UploadedFile::fake()->createWithContent('label.png', $png),
@@ -208,6 +212,7 @@ class EquipmentTest extends TestCase
             'equipment_code' => 'JY-UPS-UNIQUE',
             'name' => 'UPS 본체',
             'category' => 'UPS',
+            'inspection_cycle' => 'MONTHLY',
         ];
 
         $this->postJson('/api/equipment', $payload)->assertCreated();
@@ -265,6 +270,36 @@ class EquipmentTest extends TestCase
             ->assertJsonPath('data.attributes.0.value', '새 제조사');
     }
 
+    public function test_inspection_cycle_is_required_on_create_updated_and_copied(): void
+    {
+        $organization = Organization::query()->create(['name' => '예시 고객사']);
+        $target = Organization::query()->create(['name' => '다른 고객사']);
+        $this->actingAs($this->createUser('USER'), 'web');
+        $payload = [
+            'organization_id' => $organization->id,
+            'equipment_code' => 'JY-UPS-CYCLE',
+            'name' => 'UPS 주기',
+            'category' => 'UPS',
+        ];
+
+        $this->postJson('/api/equipment', $payload)->assertUnprocessable()->assertJsonValidationErrors(['inspection_cycle']);
+        $this->postJson('/api/equipment', [...$payload, 'inspection_cycle' => 'WEEKLY'])->assertUnprocessable()->assertJsonValidationErrors(['inspection_cycle']);
+        $equipment = $this->postJson('/api/equipment', [...$payload, 'inspection_cycle' => 'QUARTERLY'])
+            ->assertCreated()
+            ->assertJsonPath('data.inspection_cycle', 'QUARTERLY')
+            ->json('data');
+
+        $update = ['organization_id' => $organization->id, 'equipment_code' => 'JY-UPS-CYCLE', 'name' => 'UPS 주기'];
+        $this->putJson("/api/equipment/{$equipment['id']}", $update)->assertOk()->assertJsonPath('data.inspection_cycle', 'QUARTERLY');
+        $this->putJson("/api/equipment/{$equipment['id']}", [...$update, 'inspection_cycle' => null])->assertUnprocessable();
+        $this->putJson("/api/equipment/{$equipment['id']}", [...$update, 'inspection_cycle' => 'YEARLY'])->assertOk()->assertJsonPath('data.inspection_cycle', 'YEARLY');
+
+        $this->postJson("/api/equipment/{$equipment['id']}/copies", [
+            'organization_id' => $target->id,
+            'equipment_code' => 'JY-UPS-CYCLE-2',
+        ])->assertCreated()->assertJsonPath('data.inspection_cycle', 'YEARLY');
+    }
+
     public function test_specifics_is_saved_updated_and_preserved_when_equipment_is_copied(): void
     {
         $sourceOrganization = Organization::query()->create(['name' => '예시 고객사']);
@@ -276,6 +311,7 @@ class EquipmentTest extends TestCase
             'equipment_code' => 'JY-AC-NOTE-1',
             'name' => '항온항습기',
             'category' => 'PRECISION_AIR_CONDITIONER',
+            'inspection_cycle' => 'MONTHLY',
             'specifics' => '등록 시 특이사항',
         ])->assertCreated()->assertJsonPath('data.specifics', '등록 시 특이사항')->json('data');
 

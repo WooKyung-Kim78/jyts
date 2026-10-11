@@ -203,7 +203,7 @@ describe('inspection list and report', () => {
 
     expect(confirm).toHaveBeenCalled()
     await waitFor(() => expect(api.deleteInspection).toHaveBeenCalledWith(inspectionId))
-    expect(await screen.findByRole('heading', { level: 1, name: '정기점검' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: '정기점검 리스트' })).toBeInTheDocument()
     confirm.mockRestore()
   })
 })

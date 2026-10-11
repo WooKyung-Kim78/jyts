@@ -6,12 +6,12 @@
 .history-info-label {
   display: flex;
   align-items: center;
-  background: #edf1e2;
+  background: #eaf0f8;
   border-right: 1px solid #cbd5e1;
   padding: 6px 8px;
   font-size: 10px;
   font-weight: 600;
-  color: #243247;
+  color: #1b2f5c;
 }
 
 .history-empty {
@@ -30,8 +30,8 @@
 
 .history-matrix thead th,
 .history-maintenance-table thead th {
-  background: #edf1e2;
-  color: #243247;
+  background: #eaf0f8;
+  color: #1b2f5c;
   font-weight: 700;
 }
 
@@ -55,6 +55,10 @@
   body:has(.history-print-page) .app-shell-header,
   .history-screen-only {
     display: none !important;
+  }
+
+  body:has(.history-print-page) .bg-surface {
+    background: #fff !important;
   }
 
   body:has(.history-print-page) main {
@@ -109,6 +113,6 @@
   .history-info-label,
   .history-matrix thead th,
   .history-maintenance-table thead th {
-    background: #edf1e2 !important;
+    background: #eaf0f8 !important;
   }
 }

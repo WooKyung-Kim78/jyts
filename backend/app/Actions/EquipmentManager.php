@@ -175,6 +175,7 @@ class EquipmentManager
                     'name' => $data['name'] ?? $source->name,
                     'category' => $source->category,
                     'status' => $source->status,
+                    'inspection_cycle' => $source->inspection_cycle,
                     'specifics' => $source->specifics,
                     'created_by' => $actor->id,
                     'updated_by' => $actor->id,

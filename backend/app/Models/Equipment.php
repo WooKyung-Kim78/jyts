@@ -9,10 +9,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['organization_id', 'copied_from_id', 'equipment_code', 'name', 'category', 'status', 'specifics', 'assigned_user_id', 'created_by', 'updated_by'])]
+#[Fillable(['organization_id', 'copied_from_id', 'equipment_code', 'name', 'category', 'status', 'inspection_cycle', 'specifics', 'assigned_user_id', 'created_by', 'updated_by'])]
 class Equipment extends Model
 {
     use HasUuids, SoftDeletes;
+
+    public const INSPECTION_CYCLES = ['MONTHLY', 'QUARTERLY', 'YEARLY', 'ON_REQUEST'];
 
     public function organization(): BelongsTo
     {

@@ -323,12 +323,16 @@ APP_DEBUG=false
 APP_KEY=<로컬에서 php artisan key:generate --show 로 만든 값>
 APP_URL=https://wkkim97b.mycafe24.com
 LOG_LEVEL=warning
+DB_CONNECTION=mariadb
 DB_HOST=localhost
 DB_PORT=3306
 DB_DATABASE=<DB 이름>
 DB_USERNAME=<DB 사용자>
 DB_PASSWORD=<DB 비밀번호>
 DB_PERSISTENT=false
+SESSION_DRIVER=file
+CACHE_STORE=file
+QUEUE_CONNECTION=sync
 SESSION_SECURE_COOKIE=true
 SANCTUM_STATEFUL_DOMAINS=wkkim97b.mycafe24.com
 ```

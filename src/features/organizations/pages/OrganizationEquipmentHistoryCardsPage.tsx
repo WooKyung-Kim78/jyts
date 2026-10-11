@@ -29,9 +29,9 @@ export function OrganizationEquipmentHistoryCardsPage() {
   const linkedEquipment = equipment.data ?? []
 
   return (
-    <main className="history-print-page customer-equipment-history-cards mx-auto flex w-full max-w-5xl flex-col gap-3 text-slate-900">
+    <main className="history-print-page customer-equipment-history-cards mx-auto flex w-full max-w-[210mm] flex-col gap-3 text-slate-900">
       <div className="history-screen-only flex items-center justify-between gap-2">
-        <Button asChild variant="outline"><Link to="/organizations"><ArrowLeft aria-hidden="true" />고객사로 돌아가기</Link></Button>
+        <Button asChild variant="outline"><Link to={`/organizations?selected=${encodeURIComponent(organization.id)}`}><ArrowLeft aria-hidden="true" />고객사로 돌아가기</Link></Button>
         <Button type="button" onClick={() => window.print()}><Printer aria-hidden="true" />전체 장비이력카드 인쇄</Button>
       </div>
       <header className="history-screen-only flex items-end justify-between border-b border-slate-300 pb-2">

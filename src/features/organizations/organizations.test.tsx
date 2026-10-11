@@ -96,14 +96,14 @@ describe('organization page', () => {
 
   it('opens the customer edit form in a dialog', async () => {
     const user = userEvent.setup()
-    renderRoute('/organizations', { auth: activeAuth('ADMIN') })
+    renderRoute(`/organizations?selected=${organization.id}`, { auth: activeAuth('ADMIN') })
 
     await user.click(await screen.findByRole('button', { name: '예시 고객사 수정' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(screen.getByLabelText('고객사명')).toHaveValue('예시 고객사')
   })
 
-  it('searches contact and address fields and paginates twelve customer cards', async () => {
+  it('searches contact and address fields and paginates twelve customer rows', async () => {
     const user = userEvent.setup()
     const organizations = Array.from({ length: 13 }, (_, index) => ({
       ...organization,
@@ -116,30 +116,36 @@ describe('organization page', () => {
     api.getOrganizations.mockResolvedValue(organizations)
     renderRoute('/organizations', { auth: activeAuth('USER') })
 
-    expect(await screen.findByText('13개 고객사 · 1 / 2 페이지')).toBeInTheDocument()
-    const customerList = () => within(screen.getByRole('list', { name: '고객사 목록' }))
-    expect(customerList().getAllByRole('listitem')).toHaveLength(12)
-    await user.click(screen.getByRole('button', { name: '다음 페이지' }))
-    expect(screen.getByText('13개 고객사 · 2 / 2 페이지')).toBeInTheDocument()
-    expect(customerList().getAllByRole('listitem')).toHaveLength(1)
+    expect(await screen.findByText('13개 고객사 · 1/2 페이지')).toBeInTheDocument()
+    const customerRows = () => within(screen.getByRole('table', { name: '고객사 목록' })).getAllByRole('row').slice(1)
+    expect(customerRows()).toHaveLength(12)
+    await user.click(screen.getByRole('button', { name: '다음' }))
+    expect(screen.getByText('13개 고객사 · 2/2 페이지')).toBeInTheDocument()
+    expect(customerRows()).toHaveLength(1)
     expect(screen.getByText('검색 담당자')).toBeInTheDocument()
 
     await user.type(screen.getByLabelText('고객사 검색'), '부산시')
-    expect(screen.getByText('1개 고객사 · 1 / 1 페이지')).toBeInTheDocument()
-    expect(customerList().getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByText('1개 고객사 · 1/1 페이지')).toBeInTheDocument()
+    expect(customerRows()).toHaveLength(1)
     expect(screen.getByText('부산시 테스트구')).toBeInTheDocument()
   })
 
-  it('links each installed device directly to its edit page', async () => {
+  it('shows the selected customer equipment and links each device to its detail page', async () => {
+    const user = userEvent.setup()
     equipmentApi.getEquipment.mockResolvedValue([equipmentItem])
     renderRoute('/organizations', { auth: activeAuth('USER') })
 
-    expect(await screen.findByRole('link', { name: 'UPS 장비 · JY-UPS-001' }))
-      .toHaveAttribute('href', `/equipment/${equipmentItem.id}/edit`)
+    expect(await screen.findByText('고객사를 선택하세요.')).toBeInTheDocument()
+    await user.click(await screen.findByRole('link', { name: '예시 고객사' }))
+
+    const equipmentTable = await screen.findByRole('table', { name: '예시 고객사 보유 장비' })
+    expect(within(equipmentTable).getByRole('link', { name: 'UPS 장비' }))
+      .toHaveAttribute('href', `/equipment/${equipmentItem.id}`)
+    expect(within(equipmentTable).getByText('정상')).toBeInTheDocument()
   })
 
-  it('shows a history-card icon in the card header for every role', async () => {
-    renderRoute('/organizations', { auth: activeAuth('USER') })
+  it('shows a history-card icon for the selected customer for every role', async () => {
+    renderRoute(`/organizations?selected=${organization.id}`, { auth: activeAuth('USER') })
 
     expect(await screen.findByRole('link', { name: '예시 고객사 장비이력카드' }))
       .toHaveAttribute('href', `/organizations/${organization.id}/equipment-history-card`)
