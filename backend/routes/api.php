@@ -41,6 +41,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
 	Route::put('/inspections/{inspection}', [InspectionController::class, 'update']);
 	Route::delete('/inspections/{inspection}', [InspectionController::class, 'destroy']);
 	Route::post('/inspections/{inspection}/complete', [InspectionController::class, 'complete']);
+	Route::get('/inspections/{inspection}/emails', [InspectionController::class, 'emailLogs']);
+	Route::post('/inspections/{inspection}/email', [InspectionController::class, 'sendEmail'])->middleware('throttle:10,1');
 	Route::scopeBindings()->group(function (): void {
 		Route::put('/inspections/{inspection}/items/{item}', [InspectionController::class, 'updateItem']);
 		Route::post('/inspections/{inspection}/items/{item}/photos', [InspectionPhotoController::class, 'store']);

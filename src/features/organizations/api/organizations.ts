@@ -8,6 +8,7 @@ export const organizationSchema = z.object({
   address: z.string().nullable(),
   contact_name: z.string().nullable(),
   contact_phone: z.string().nullable(),
+  contact_email: z.string().nullable().default(null),
   map_image_url: z.string().nullable(),
   created_at: z.string().nullable(),
   updated_at: z.string().nullable(),
@@ -18,6 +19,7 @@ export const organizationInputSchema = z.object({
   address: z.string().trim().max(500).nullable(),
   contact_name: z.string().trim().max(100).nullable(),
   contact_phone: z.string().trim().max(30).nullable(),
+  contact_email: z.string().trim().max(254).refine((value) => value === '' || z.email().safeParse(value).success).nullable(),
 })
 
 export type Organization = z.infer<typeof organizationSchema>

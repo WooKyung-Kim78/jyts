@@ -19,6 +19,7 @@ class StoreOrganizationRequest extends FormRequest
             'address' => ['nullable', 'string', 'max:500'],
             'contact_name' => ['nullable', 'string', 'max:100'],
             'contact_phone' => ['nullable', 'string', 'max:30'],
+            'contact_email' => ['nullable', 'string', 'email:rfc', 'max:254'],
         ];
     }
 }

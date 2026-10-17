@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Actions\InspectionManager;
 use App\Http\Requests\IndexInspectionRequest;
 use App\Http\Requests\SaveInspectionItemRequest;
+use App\Http\Requests\SendInspectionEmailRequest;
 use App\Http\Requests\StoreInspectionRequest;
 use App\Http\Requests\UpdateInspectionRequest;
+use App\Http\Resources\InspectionEmailLogResource;
 use App\Http\Resources\InspectionItemResource;
 use App\Http\Resources\InspectionResource;
 use App\Models\Equipment;
@@ -16,6 +18,8 @@ use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 class InspectionController extends Controller
 {
@@ -95,6 +99,39 @@ class InspectionController extends Controller
     {
         Gate::authorize('update', $inspection);
         $manager->complete($inspection, $request->user());
+
+        return ApiResponse::ok($this->detail($inspection, $request));
+    }
+
+    public function emailLogs(Request $request, Inspection $inspection): JsonResponse
+    {
+        Gate::authorize('view', $inspection);
+
+        return ApiResponse::ok(InspectionEmailLogResource::collection(
+            $inspection->emailLogs()->with('sender')->get()
+        )->resolve($request));
+    }
+
+    public function sendEmail(SendInspectionEmailRequest $request, Inspection $inspection, InspectionManager $manager): JsonResponse
+    {
+        Gate::authorize('sendEmail', $inspection);
+        $to = $request->validated('to');
+
+        // Local dev shares the production DB, so a log-only mailer must not lock the report as sent.
+        if (in_array(config('mail.default'), ['log', 'array'], true) && ! app()->runningUnitTests()) {
+            return ApiResponse::fail(503, '메일 서버가 설정되지 않아 발송할 수 없습니다.');
+        }
+
+        try {
+            $manager->sendReportEmail($inspection, $to, $request->user());
+        } catch (TransportExceptionInterface $exception) {
+            Log::warning('Inspection report e-mail failed.', [
+                'inspection_id' => $inspection->id,
+                'error' => str_replace($to, '[recipient]', $exception->getMessage()),
+            ]);
+
+            return ApiResponse::fail(502, '메일을 발송하지 못했습니다. 메일 서버 설정을 확인한 뒤 다시 시도하세요.');
+        }
 
         return ApiResponse::ok($this->detail($inspection, $request));
     }

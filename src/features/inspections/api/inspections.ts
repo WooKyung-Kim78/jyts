@@ -39,6 +39,7 @@ export const inspectionSchema = z.object({
     name: z.string(),
     equipment_code: z.string(),
     organization_name: z.string().nullable(),
+    organization_contact_email: z.string().nullable().optional(),
     assigned_user_id: z.string().nullable(),
     assigned_user_name: z.string().nullable(),
   }).nullable(),
@@ -47,11 +48,13 @@ export const inspectionSchema = z.object({
   inspected_on: z.string().nullable(),
   completed_at: z.string().nullable(),
   emailed_at: z.string().nullable(),
+  emailed_to: z.string().nullable().optional(),
   remarks: z.string().nullable(),
   has_bad_result: z.boolean().optional(),
   created_by: z.object({ id: z.string(), name: z.string().nullable() }),
   can_edit: z.boolean(),
   can_delete: z.boolean(),
+  can_send_email: z.boolean().default(false),
   items: z.array(inspectionItemSchema).optional(),
   created_at: z.string().nullable(),
   updated_at: z.string().nullable(),
@@ -150,6 +153,26 @@ export async function deleteInspection(id: string): Promise<void> {
 
 export async function completeInspection(id: string): Promise<Inspection> {
   return inspectionSchema.parse(await apiRequest<unknown>(`/api/inspections/${encodeURIComponent(id)}/complete`, { method: 'POST' }))
+}
+
+export async function sendInspectionEmail(id: string, to: string): Promise<Inspection> {
+  return inspectionSchema.parse(await apiRequest<unknown>(`/api/inspections/${encodeURIComponent(id)}/email`, {
+    method: 'POST',
+    body: JSON.stringify({ to }),
+  }))
+}
+
+const inspectionEmailLogSchema = z.object({
+  id: z.uuid(),
+  sent_to: z.string(),
+  sent_at: z.string().nullable(),
+  sent_by: z.object({ id: z.string(), name: z.string().nullable() }),
+})
+
+export type InspectionEmailLog = z.infer<typeof inspectionEmailLogSchema>
+
+export async function getInspectionEmailLogs(id: string): Promise<InspectionEmailLog[]> {
+  return z.array(inspectionEmailLogSchema).parse(await apiRequest<unknown>(`/api/inspections/${encodeURIComponent(id)}/emails`))
 }
 
 export async function uploadInspectionPhoto(inspectionId: string, itemId: string, image: File): Promise<InspectionPhoto> {

@@ -82,6 +82,13 @@ describe('organization page', () => {
 
     await user.click(await screen.findByRole('button', { name: '고객사 등록' }))
     await user.type(await screen.findByLabelText('고객사명'), '새 고객사')
+    await user.type(screen.getByLabelText('담당자 이메일'), 'invalid')
+    await user.click(screen.getByRole('button', { name: '저장' }))
+    expect(await screen.findByText('이메일 형식을 확인하세요.')).toBeInTheDocument()
+    expect(api.saveOrganization).not.toHaveBeenCalled()
+
+    await user.clear(screen.getByLabelText('담당자 이메일'))
+    await user.type(screen.getByLabelText('담당자 이메일'), 'manager@example.com')
     await user.click(screen.getByRole('button', { name: '저장' }))
 
     expect(api.saveOrganization).toHaveBeenCalledWith({
@@ -89,6 +96,7 @@ describe('organization page', () => {
       address: null,
       contact_name: null,
       contact_phone: null,
+      contact_email: 'manager@example.com',
     }, undefined)
     expect(await screen.findByRole('status')).toHaveTextContent('고객사 정보를 저장했습니다.')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

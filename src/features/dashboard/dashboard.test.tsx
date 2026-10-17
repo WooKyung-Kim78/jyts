@@ -60,6 +60,7 @@ function inspection(id: number, equipmentId: number, inspectedOn: string, status
     created_by: { id: '22', name: '점검 직원' },
     can_edit: true,
     can_delete: false,
+    can_send_email: false,
     created_at: null,
     updated_at: null,
   }

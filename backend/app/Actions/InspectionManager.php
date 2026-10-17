@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Mail\InspectionReportMail;
 use App\Models\Equipment;
 use App\Models\Inspection;
 use App\Models\InspectionItem;
@@ -9,10 +10,15 @@ use App\Models\InspectionTemplate;
 use App\Models\User;
 use App\Support\InspectionInputTemplate;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
+use Throwable;
 
 class InspectionManager
 {
+    // Gmail rejects messages over 25MB; base64 encoding adds about a third.
+    public const MAX_EMAIL_ATTACHMENT_BYTES = 18 * 1024 * 1024;
     /** @return array{0: Inspection, 1: bool} */
     public function start(Equipment $equipment, User $actor): array
     {
@@ -119,5 +125,42 @@ class InspectionManager
 
             return $inspection;
         });
+    }
+
+    public function sendReportEmail(Inspection $inspection, string $to, User $actor): Inspection
+    {
+        $inspection->load(['equipment.organization', 'creator', 'items.photos']);
+        if (InspectionReportMail::attachmentBytes($inspection) > self::MAX_EMAIL_ATTACHMENT_BYTES) {
+            throw ValidationException::withMessages([
+                'to' => '점검 사진 용량이 18MB를 넘어 메일로 보낼 수 없습니다. 사진 일부를 삭제한 뒤 다시 시도하세요.',
+            ]);
+        }
+
+        $previous = [
+            'emailed_at' => $inspection->getRawOriginal('emailed_at'),
+            'emailed_to' => $inspection->getRawOriginal('emailed_to'),
+            'emailed_by' => $inspection->getRawOriginal('emailed_by'),
+        ];
+
+        // Lock the report before sending so it cannot be edited while the mail is in flight.
+        $sentAt = now();
+        $claimed = Inspection::query()
+            ->whereKey($inspection->id)
+            ->where('status', 'COMPLETED')
+            ->update(['emailed_at' => $sentAt, 'emailed_to' => $to, 'emailed_by' => $actor->id, 'updated_by' => $actor->id]);
+        if ($claimed === 0) {
+            throw new ConflictHttpException;
+        }
+
+        try {
+            Mail::to($to)->send(new InspectionReportMail($inspection));
+        } catch (Throwable $exception) {
+            Inspection::query()->whereKey($inspection->id)->update($previous);
+            throw $exception;
+        }
+
+        $inspection->emailLogs()->create(['sent_to' => $to, 'sent_by' => $actor->id, 'sent_at' => $sentAt]);
+
+        return $inspection->refresh();
     }
 }

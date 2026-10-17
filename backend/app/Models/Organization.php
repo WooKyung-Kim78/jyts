@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
-#[Fillable(['name', 'address', 'contact_name', 'contact_phone', 'map_image_path', 'created_by', 'updated_by'])]
+#[Fillable(['name', 'address', 'contact_name', 'contact_phone', 'contact_email', 'map_image_path', 'created_by', 'updated_by'])]
 class Organization extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;

@@ -335,7 +335,17 @@ CACHE_STORE=file
 QUEUE_CONNECTION=sync
 SESSION_SECURE_COOKIE=true
 SANCTUM_STATEFUL_DOMAINS=wkkim97b.mycafe24.com
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=<발송용 Gmail 주소>
+MAIL_PASSWORD=<Google 앱 비밀번호 16자리>
+MAIL_FROM_ADDRESS=<발송용 Gmail 주소>
+MAIL_FROM_NAME=JYTS
 ```
+
+> 점검 결과 이메일은 Gmail SMTP로 보냅니다. Gmail 계정에 **2단계 인증**을 켜고 Google 계정 → 보안 → **앱 비밀번호**에서 만든 16자리를 `MAIL_PASSWORD`에 넣습니다(일반 로그인 비밀번호는 거부됩니다).
+> `.env`를 고친 뒤에는 `php artisan config:cache`를 다시 실행합니다. 로컬에서 `MAIL_MAILER=log`이면 발송 요청이 거부됩니다(로컬도 운영 DB를 쓰므로 실제로 보내지 않은 점검일지가 잠기지 않도록).
 
 > 이미 운영 중인 `APP_KEY`가 있다면 그 값을 그대로 쓰세요. 바꾸면 기존 로그인 세션이 모두 끊깁니다.
 

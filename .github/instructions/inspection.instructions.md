@@ -69,7 +69,13 @@ applyTo: "src/features/inspections/**,backend/app/Http/**/*Inspection*.php,backe
 - 완료된 점검(`COMPLETED`)은 담당자에게 이메일을 보내기 전(`emailed_at` null)까지 작성자(`created_by`)와 ADMIN만 수정할 수 있다. 이메일을 보낸 뒤에는 누구도 수정할 수 없다. 완료된 점검을 수정할 때는 항목 결과를 비울 수 없다.
 - 점검일지 삭제는 `작성 중`(`DRAFT`)과 `완료`(`COMPLETED`)이면서 이메일 발송 전인 점검만 가능하며, 수정 권한과 같은 작성자 또는 ADMIN만 할 수 있다(`DELETE /api/inspections/{id}`, 리포트 화면의 `점검일지 삭제` 버튼, 확인 후 실행). 삭제는 soft delete(`deleted_at`, `deleted_by`)로 처리해 목록·조회·참고값에서 제외하고, 항목·사진 row와 파일은 보존한다.
 - 이메일 발송은 상태값을 바꾸지 않는다. `status`는 `COMPLETED`로 유지하고 `emailed_at`에 발송 시각을 기록하며, 화면에는 `이메일 발송 완료`로 표시한다. 발송 후에는 수정·삭제할 수 없다.
-- 담당자 이메일 발송 기능과 발송 대상, 내용은 `확인 필요`(리포트 화면과 함께 구현). 고객 확인 서명은 현재 범위에 포함하지 않는다.
+- 점검 결과 이메일은 리포트 화면의 `이메일 발송`(발송 후 `이메일 재발송`) 버튼으로 점검일지 1건씩 보낸다(`POST /api/inspections/{id}/email`, body `{ to }`, 분당 10회 제한).
+  - 권한: `COMPLETED` 점검을 작성자 또는 ADMIN이 발송한다(Policy `sendEmail`, 응답 `can_send_email`). 발송 후에도 같은 권한으로 여러 번 재발송할 수 있다. `emailed_at`/`emailed_to`/`emailed_by`는 마지막 발송 기준이다.
+  - 발송 이력: 전송에 성공할 때마다 `inspection_email_logs`(`sent_at`, `sent_to`, `sent_by`)에 한 행을 추가하며 수정·삭제 API는 두지 않는다. 리포트의 `이메일 이력` 버튼(발송 이력이 있을 때)은 modal에서 `발송 일시`(Asia/Seoul `YYYY-MM-DD HH:mm`), `받는 사람`, `보낸 직원`을 최신순으로 보여준다(`GET /api/inspections/{id}/emails`, 활성 직원 조회 가능).
+  - 수신자: 고객사 `organizations.contact_email`(담당자 이메일)을 기본값으로 채우고(재발송은 직전 수신자) 발송 시 수정할 수 있다. 주소 1개, 최대 254자.
+  - 내용: HTML 본문(기본정보, category별 점검 표, 기타사항) + 항목 사진 첨부(`item-{항목번호}-photo-{순번}.{ext}`). 사진 합계가 18MB를 넘으면 422로 거부한다(Gmail 25MB 제한).
+  - 발송 전 `emailed_at`/`emailed_to`/`emailed_by`를 먼저 기록해 전송 중 수정을 막고(`COMPLETED`가 아니면 409), 메일 전송 실패 시 직전 발송 기록(최초 발송이면 null)으로 되돌리고 502를 반환한다. 로컬도 운영 DB를 쓰므로 `MAIL_MAILER`가 `log`/`array`이면(테스트 제외) 503으로 거부한다.
+  - 메일 서버는 Gmail SMTP(`smtp.gmail.com:587`, 앱 비밀번호)이며 계정은 서버 `.env`에만 둔다. 고객 확인 서명은 현재 범위에 포함하지 않는다.
 - 점검 상태는 `DRAFT`, `COMPLETED`, `CANCELLED`를 사용한다. 종합 결과는 `NORMAL`, `CAUTION`, `REPAIR_REQUIRED`, `OUT_OF_SERVICE`를 사용한다.
 - 항목별 결과에서 종합 결과를 계산하는 규칙은 별도 업무 확인 전까지 구현하지 않는다.
 - 장비가 폐기되거나 고객사에서 이동되어도 과거 점검 이력과 당시 snapshot을 삭제하지 않는다.

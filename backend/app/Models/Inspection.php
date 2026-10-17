@@ -42,6 +42,11 @@ class Inspection extends Model
         return $this->hasMany(InspectionItem::class)->orderBy('sort_order');
     }
 
+    public function emailLogs(): HasMany
+    {
+        return $this->hasMany(InspectionEmailLog::class)->orderByDesc('sent_at');
+    }
+
     public function isLocked(): bool
     {
         return $this->emailed_at !== null || ! in_array($this->status, ['DRAFT', 'COMPLETED'], true);

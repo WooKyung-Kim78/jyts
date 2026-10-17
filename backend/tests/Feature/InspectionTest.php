@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Mail\InspectionReportMail;
 use App\Models\Equipment;
 use App\Models\Inspection;
 use App\Models\InspectionItemPhoto;
@@ -11,7 +12,9 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\Mailer\Exception\TransportException;
 use Tests\TestCase;
 
 class InspectionTest extends TestCase
@@ -317,6 +320,121 @@ class InspectionTest extends TestCase
             ->assertJsonCount(1, 'data.items')
             ->assertJsonPath('data.items.0.id', $emailed->id)
             ->assertJsonPath('data.items.0.can_delete', false);
+    }
+
+    public function test_author_sends_the_report_email_with_photos_and_can_resend_it(): void
+    {
+        Storage::fake('local');
+        Mail::fake();
+        $author = $this->createUser('USER');
+        $inspection = $this->startInspection($author);
+        $inspection->equipment->organization->forceFill(['contact_email' => 'customer@example.com'])->save();
+        [$first, $second] = $inspection->items()->orderBy('sort_order')->get()->all();
+        $url = "/api/inspections/{$inspection->id}/email";
+
+        $this->actAs($author)
+            ->putJson("/api/inspections/{$inspection->id}/items/{$first->id}", ['input_values' => ['1', '2', '정상'], 'result' => 'GOOD'])
+            ->assertOk();
+        $this->putJson("/api/inspections/{$inspection->id}/items/{$second->id}", ['input_values' => [], 'result' => 'BAD', 'remarks' => '필터 오염'])
+            ->assertOk();
+        $this->post("/api/inspections/{$inspection->id}/items/{$first->id}/photos", [
+            'image' => UploadedFile::fake()->createWithContent('site.png', base64_decode(self::PNG)),
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        $this->getJson("/api/inspections/{$inspection->id}")
+            ->assertJsonPath('data.can_send_email', false)
+            ->assertJsonPath('data.equipment.organization_contact_email', 'customer@example.com');
+        $this->postJson($url, ['to' => 'customer@example.com'])->assertForbidden();
+        $this->postJson("/api/inspections/{$inspection->id}/complete")->assertOk()->assertJsonPath('data.can_send_email', true);
+        $this->getJson('/api/inspections')->assertJsonMissingPath('data.items.0.equipment.organization_contact_email');
+
+        $this->actAs($this->createUser('USER'))
+            ->postJson($url, ['to' => 'customer@example.com'])->assertForbidden();
+
+        $this->actAs($author)
+            ->postJson($url, ['to' => 'not-an-email'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['to']);
+        $this->postJson($url, ['to' => 'other@example.com'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'COMPLETED')
+            ->assertJsonPath('data.emailed_to', 'other@example.com')
+            ->assertJsonPath('data.can_send_email', true)
+            ->assertJsonPath('data.can_edit', false);
+        $this->assertDatabaseHas('inspections', ['id' => $inspection->id, 'emailed_by' => $author->id]);
+        $this->assertNotNull($inspection->fresh()->emailed_at);
+
+        Mail::assertSent(InspectionReportMail::class, function (InspectionReportMail $mail): bool {
+            $html = $mail->render();
+
+            return $mail->hasTo('other@example.com')
+                && count($mail->attachments()) === 1
+                && str_contains($html, '1 ~ 2 A, 상태:정상')
+                && str_contains($html, '필터 오염');
+        });
+        Mail::assertSentCount(1);
+
+        $this->actAs($this->createUser('USER'))
+            ->postJson($url, ['to' => 'customer@example.com'])->assertForbidden();
+
+        $admin = $this->createUser('ADMIN');
+        $this->travel(1)->minutes();
+        $this->actAs($admin)
+            ->postJson($url, ['to' => 'customer@example.com'])
+            ->assertOk()
+            ->assertJsonPath('data.emailed_to', 'customer@example.com')
+            ->assertJsonPath('data.can_edit', false);
+        $this->assertDatabaseHas('inspections', ['id' => $inspection->id, 'emailed_by' => $admin->id]);
+        Mail::assertSent(InspectionReportMail::class, fn (InspectionReportMail $mail): bool => $mail->hasTo('customer@example.com'));
+        Mail::assertSentCount(2);
+
+        $this->actAs($this->createUser('USER'))
+            ->getJson("/api/inspections/{$inspection->id}/emails")
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.sent_to', 'customer@example.com')
+            ->assertJsonPath('data.0.sent_by.name', $admin->name)
+            ->assertJsonPath('data.1.sent_to', 'other@example.com')
+            ->assertJsonPath('data.1.sent_by.name', $author->name);
+    }
+
+    public function test_failed_resend_keeps_the_previous_send_record(): void
+    {
+        $author = $this->createUser('USER');
+        $inspection = $this->startInspection($author);
+        $sentAt = now()->subDay()->startOfSecond();
+        $inspection->forceFill([
+            'status' => 'COMPLETED',
+            'completed_at' => now(),
+            'emailed_at' => $sentAt,
+            'emailed_to' => 'first@example.com',
+            'emailed_by' => $author->id,
+        ])->save();
+        Mail::shouldReceive('to')->once()->andThrow(new TransportException('Connection refused'));
+
+        $this->actAs($author)
+            ->postJson("/api/inspections/{$inspection->id}/email", ['to' => 'second@example.com'])
+            ->assertStatus(502);
+
+        $fresh = $inspection->fresh();
+        $this->assertSame('first@example.com', $fresh->emailed_to);
+        $this->assertTrue($sentAt->equalTo($fresh->emailed_at));
+        $this->assertDatabaseCount('inspection_email_logs', 0);
+    }
+
+    public function test_failed_report_email_keeps_the_inspection_unsent(): void
+    {
+        $author = $this->createUser('USER');
+        $inspection = $this->startInspection($author);
+        $inspection->forceFill(['status' => 'COMPLETED', 'completed_at' => now()])->save();
+        Mail::shouldReceive('to')->once()->andThrow(new TransportException('Connection refused for customer@example.com'));
+
+        $this->actAs($this->createUser('ADMIN'))
+            ->postJson("/api/inspections/{$inspection->id}/email", ['to' => 'customer@example.com'])
+            ->assertStatus(502)
+            ->assertJsonPath('success', false);
+
+        $this->assertDatabaseHas('inspections', ['id' => $inspection->id, 'emailed_at' => null, 'emailed_to' => null, 'emailed_by' => null]);
     }
 
     private function startInspection(User $user): Inspection

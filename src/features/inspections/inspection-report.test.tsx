@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
   getInspection: vi.fn(),
   updateInspectionRemarks: vi.fn(),
   deleteInspection: vi.fn(),
+  sendInspectionEmail: vi.fn(),
+  getInspectionEmailLogs: vi.fn(),
   getEquipmentById: vi.fn(),
 }))
 
@@ -19,6 +21,8 @@ vi.mock('@/features/inspections/api/inspections', async (importOriginal) => ({
   getInspection: api.getInspection,
   updateInspectionRemarks: api.updateInspectionRemarks,
   deleteInspection: api.deleteInspection,
+  sendInspectionEmail: api.sendInspectionEmail,
+  getInspectionEmailLogs: api.getInspectionEmailLogs,
 }))
 
 vi.mock('@/features/equipment/api/equipment', async (importOriginal) => ({
@@ -191,6 +195,68 @@ describe('inspection list and report', () => {
     expect(screen.queryByRole('link', { name: '점검일지 수정' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '기타사항 저장' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '점검일지 삭제' })).not.toBeInTheDocument()
+  })
+
+  it('shows the e-mail history in a dialog', async () => {
+    const user = userEvent.setup()
+    api.getInspection.mockResolvedValue(inspection({ can_edit: false, can_delete: false, emailed_at: '2026-10-16T00:30:00.000Z' }))
+    api.getInspectionEmailLogs.mockResolvedValue([
+      { id: '00000000-0000-4000-8000-000000000931', sent_to: 'second@example.com', sent_at: '2026-10-16T00:30:00.000Z', sent_by: { id: '2', name: '관리자' } },
+      { id: '00000000-0000-4000-8000-000000000932', sent_to: 'first@example.com', sent_at: '2026-10-15T08:05:00.000Z', sent_by: { id: '1', name: '테스트 사용자' } },
+    ])
+    renderRoute(`/inspections/${inspectionId}/report`, { auth: activeAuth('USER') })
+
+    await user.click(await screen.findByRole('button', { name: '이메일 이력' }))
+    const dialog = await screen.findByRole('dialog', { name: '이메일 발송 이력' })
+    const rows = within(await within(dialog).findByRole('table', { name: '이메일 발송 이력' })).getAllByRole('row').slice(1)
+    expect(api.getInspectionEmailLogs).toHaveBeenCalledWith(inspectionId)
+    expect(rows.map((row) => Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent))).toEqual([
+      ['2026-10-16 09:30', 'second@example.com', '관리자'],
+      ['2026-10-15 17:05', 'first@example.com', '테스트 사용자'],
+    ])
+  })
+
+  it('sends the report e-mail to the customer contact, locks the report and allows resending', async () => {
+    const user = userEvent.setup()
+    const sendable = inspection({
+      can_send_email: true,
+      equipment: { ...inspection().equipment, organization_contact_email: 'manager@example.com' },
+    })
+    api.getInspection.mockResolvedValue(sendable)
+    api.sendInspectionEmail.mockResolvedValue({
+      ...sendable,
+      can_send_email: true,
+      can_edit: false,
+      can_delete: false,
+      emailed_at: '2026-10-16T00:00:00.000Z',
+      emailed_to: 'other@example.com',
+    })
+    renderRoute(`/inspections/${inspectionId}/report`, { auth: activeAuth('USER') })
+
+    await user.click(await screen.findByRole('button', { name: '이메일 발송' }))
+    const dialog = await screen.findByRole('dialog', { name: '점검 결과 이메일 발송' })
+    const to = within(dialog).getByLabelText('받는 사람')
+    expect(to).toHaveValue('manager@example.com')
+
+    await user.clear(to)
+    await user.type(to, 'invalid')
+    expect(within(dialog).getByRole('button', { name: '발송' })).toBeDisabled()
+    await user.clear(to)
+    await user.type(to, 'other@example.com')
+    await user.click(within(dialog).getByRole('button', { name: '발송' }))
+
+    expect(api.sendInspectionEmail).toHaveBeenCalledWith(inspectionId, 'other@example.com')
+    expect(await screen.findByText('점검 결과를 이메일로 발송했습니다.')).toBeInTheDocument()
+    expect(screen.getByText('이메일 발송 완료')).toBeInTheDocument()
+    expect(screen.getByText('발송 대상 other@example.com')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '이메일 발송' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '점검일지 수정' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '이메일 재발송' }))
+    const resendDialog = await screen.findByRole('dialog', { name: '점검 결과 이메일 재발송' })
+    expect(within(resendDialog).getByLabelText('받는 사람')).toHaveValue('other@example.com')
+    await user.click(within(resendDialog).getByRole('button', { name: '발송' }))
+    await waitFor(() => expect(api.sendInspectionEmail).toHaveBeenCalledTimes(2))
   })
 
   it('deletes the inspection after confirmation and returns to the list', async () => {

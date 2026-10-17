@@ -18,6 +18,7 @@ class OrganizationResource extends JsonResource
             'contact_phone' => $request->user()?->role === 'USER'
                 ? $this->maskPhone($this->contact_phone)
                 : $this->contact_phone,
+            'contact_email' => $this->contact_email,
             'map_image_url' => $this->map_image_path ? "/api/organizations/{$this->id}/map" : null,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),

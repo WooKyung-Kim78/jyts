@@ -35,4 +35,12 @@ class InspectionPolicy
     {
         return $this->update($user, $inspection);
     }
+
+    // The author or an ADMIN can send (and resend) the report e-mail after completion.
+    public function sendEmail(User $user, Inspection $inspection): bool
+    {
+        return $user->active
+            && $inspection->status === 'COMPLETED'
+            && ($user->role === 'ADMIN' || (int) $inspection->created_by === (int) $user->id);
+    }
 }

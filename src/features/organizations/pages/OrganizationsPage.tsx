@@ -64,6 +64,7 @@ export function OrganizationsPage() {
         address: values.address?.trim() || null,
         contact_name: values.contact_name?.trim() || null,
         contact_phone: values.contact_phone?.trim() || null,
+        contact_email: values.contact_email?.trim() || null,
       }, id)
       if (image) await uploadOrganizationMap(organization.id, image)
       return organization
@@ -271,6 +272,7 @@ function OrganizationDetail({ organization, equipment, equipmentLoading, canMana
             items={[
               { label: '담당자', value: organization.contact_name },
               { label: '연락처', value: organization.contact_phone },
+              { label: '이메일', value: organization.contact_email },
               { label: '주소', value: organization.address },
             ]}
           />
@@ -352,6 +354,7 @@ function OrganizationDialog({
       address: organization?.address ?? '',
       contact_name: organization?.contact_name ?? '',
       contact_phone: organization?.contact_phone ?? '',
+      contact_email: organization?.contact_email ?? '',
     },
   })
 
@@ -379,6 +382,11 @@ function OrganizationDialog({
           <div className="flex flex-col gap-2">
             <Label htmlFor="organization-contact-phone">연락처</Label>
             <Input id="organization-contact-phone" type="tel" autoComplete="tel" {...register('contact_phone')} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="organization-contact-email">담당자 이메일</Label>
+            <Input id="organization-contact-email" type="email" autoComplete="email" aria-invalid={Boolean(errors.contact_email)} {...register('contact_email')} />
+            {errors.contact_email && <p className="text-sm text-destructive">이메일 형식을 확인하세요.</p>}
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="organization-address">주소</Label>
